@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bridge</title>
+<meta name="description" content="One board for two Claude accounts and a local model, on a Mac and a foldable iPhone.">
+<meta name="theme-color" content="#FFFFFF">
+<style>
+/* Bridge, shown in the bollineni.co "Swiss Tombstone" system: white page, black type, one red, Archivo wide and heavy. */
+@font-face { font-family: "Archivo"; src: url("/fonts/archivo.woff2") format("woff2"); font-weight: 100 900; font-stretch: 62% 125%; font-display: swap; }
+:root { --ink: #000; --body: #262626; --quiet: #5E5E5E; --paper: #fff; --red: #D62E1F; --ult: #FF9F0A; --pro: #BF5AF2; --mac: #40C8E0;
+  --sans: "Archivo", "Helvetica Neue", Helvetica, Arial, sans-serif; --side: max(24px, env(safe-area-inset-left), env(safe-area-inset-right)); }
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 400 17px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+a { color: inherit; text-underline-offset: 3px; }
+a:hover { color: var(--red); }
+:focus-visible { outline: 2px solid var(--red); outline-offset: 3px; }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 var(--side); }
+header { padding-top: calc(36px + env(safe-area-inset-top)); container-type: inline-size; }
+h1 { margin: 0 0 0 -.05em; font-size: clamp(64px, 19cqw, 230px); font-weight: 900; font-stretch: 125%; line-height: .84; letter-spacing: -.055em; }
+h1 i { font-style: normal; color: var(--red); }
+.kind { margin: 22px 0 0; font-size: 15px; font-weight: 600; color: var(--quiet); }
+.lede { margin: 10px 0 0; max-width: 30em; font-size: clamp(21px, 2.3vw, 29px); line-height: 1.28; font-weight: 500; letter-spacing: -.015em; }
+.go { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+.btn { display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 22px; border: 2px solid var(--ink); font: 700 15px/1 var(--sans); text-decoration: none; background: var(--paper); color: var(--ink); }
+.btn.solid { background: var(--ink); color: var(--paper); }
+.btn:hover { background: var(--red); border-color: var(--red); color: var(--paper); }
+.shot { display: block; width: 100%; height: auto; border: 2px solid var(--ink); background: #fff; }
+.mac { margin-top: 48px; }
+.tombs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; background: var(--ink); border: 2px solid var(--ink); margin-top: 56px; container-type: inline-size; }
+.tomb { background: var(--paper); padding: 18px 18px 16px; min-height: 168px; display: flex; flex-direction: column; justify-content: space-between; gap: 10px; }
+.tomb.inv { background: var(--ink); color: var(--paper); }
+.tomb b { font-size: clamp(34px, 5.2cqw, 60px); font-weight: 800; font-stretch: 112%; letter-spacing: -.045em; line-height: 1; font-variant-numeric: tabular-nums; }
+.tomb span { font-size: 14.5px; color: var(--quiet); }
+.tomb.inv span { color: #C9C9C9; }
+.tomb small { font-size: 15px; font-weight: 600; }
+.split { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 0 24px; margin-top: 96px; }
+h2 { margin: 0; font-size: clamp(30px, 3.3vw, 46px); line-height: 1; font-weight: 800; font-stretch: 112%; letter-spacing: -.03em; }
+.split > h2 { grid-column: span 4; padding-top: 18px; }
+.split > .rows { grid-column: span 8; }
+.row { padding: 18px 0 22px; border-top: 1px solid var(--ink); }
+.rows > .row:first-child { border-top-width: 2px; }
+h3 { margin: 0 0 6px; font-size: clamp(20px, 2vw, 25px); font-weight: 700; letter-spacing: -.02em; line-height: 1.2; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
+.row p { margin: 0; color: var(--body); max-width: 40em; }
+.chip { display: inline-block; font: 700 11px/1 ui-monospace, Menlo, monospace; padding: 4px 6px; color: #000; vertical-align: 3px; }
+.phones { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 28px; }
+.phones figure, .unfold { margin: 0; }
+figcaption { margin-top: 10px; font-size: 14px; color: var(--quiet); }
+.unfold { margin-top: 24px; }
+ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+li { position: relative; padding-left: 22px; color: var(--body); }
+li::before { content: ""; position: absolute; left: 0; top: .72em; width: 11px; height: 2px; background: var(--red); }
+li b { color: var(--ink); }
+code { font: 14px ui-monospace, Menlo, monospace; background: #F2F2F2; padding: 1px 5px; }
+footer { margin-top: 110px; padding: 40px 0 calc(48px + env(safe-area-inset-bottom)); border-top: 2px solid var(--ink); }
+footer p { margin: 14px 0 0; color: var(--quiet); font-size: 14.5px; max-width: 44em; }
+@media (max-width: 760px) {
+  .tombs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .split > h2, .split > .rows { grid-column: 1 / -1; }
+  .split > h2 { padding: 0 0 16px; }
+  .phones { grid-template-columns: 1fr; max-width: 430px; }
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <h1>Bridge<i>.</i></h1>
+    <p class="kind">Mac + iPhone Duo · native SwiftUI</p>
+    <p class="lede">One board for two Claude accounts and a model running on my Mac. See what each one is doing, decide what only you can, and hand off work in a line.</p>
+    <div class="go">
+      <a class="btn solid" href="https://github.com/bollineni-create/bridge" target="_blank" rel="noopener">View the code on GitHub →</a>
+      <a class="btn" href="#how">How it works</a>
+    </div>
+  </header>
+
+  <img class="shot mac" src="assets/mac-command.png" width="2880" height="1920" alt="Bridge on the Mac: the Command screen with today's figures, three runners side by side, what needs you and what's next.">
+
+  <section class="tombs" aria-label="Bridge in numbers">
+    <div class="tomb inv"><small>Runners</small><b>3</b><span>Two Claude accounts and Qwen on the Mac</span></div>
+    <div class="tomb"><small>Phone to Mac</small><b>0.1 s</b><span>A tap on the phone runs on the Mac</span></div>
+    <div class="tomb"><small>Claude usage</small><b>$0</b><span>for jobs Qwen can do locally</span></div>
+    <div class="tomb"><small>Board</small><b>1</b><span>shared by every runner, on both devices</span></div>
+  </section>
+
+  <section class="split">
+    <h2>What it does</h2>
+    <div class="rows">
+      <div class="row"><h3>Now</h3><p>One lane per runner: the chat it's in, the step it's on, a live timer. A runner waiting on you turns red and names the chat that's waiting. Only a working runner shows its colour.</p></div>
+      <div class="row"><h3>Needs you</h3><p>Tasks only you can do, decisions the runners raised, and actions that wait for your OK, like a message to send. Done, Approve and Deny apply instantly and roll back if the engine refuses.</p></div>
+      <div class="row"><h3>Board</h3><p>Moving, open, yours and done, with a fixed ID column, who each task is for and when it's due.</p></div>
+      <div class="row"><h3>Ask</h3><p>Type a request and Bridge routes it: to Qwen when local is enough, to Claude when it needs the web, code or judgment. It says why, and one tap sends it to the other account instead.</p></div>
+    </div>
+  </section>
+
+  <section class="split">
+    <h2>On the iPhone Duo</h2>
+    <div class="rows">
+      <div class="row"><p>Folded, it's one screen at a time. Unfolded, Now stays on the left and the rest sits beside it.</p></div>
+      <div class="phones">
+        <figure><img class="shot" src="assets/phone-now.png" width="860" height="1864" alt="Now: three runner lanes and today's figures."><figcaption>Now</figcaption></figure>
+        <figure><img class="shot" src="assets/phone-needs.png" width="860" height="1864" alt="Needs you: tasks, a decision and a message waiting for approval."><figcaption>Needs you</figcaption></figure>
+        <figure><img class="shot" src="assets/phone-board.png" width="860" height="1864" alt="Board: what's moving, with runner badges and due dates."><figcaption>Board</figcaption></figure>
+      </div>
+      <figure class="unfold"><img class="shot" src="assets/phone-unfolded.png" width="2000" height="1520" alt="Unfolded: Now on the left, Needs you on the right."><figcaption>Unfolded</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="split" id="how">
+    <h2>How it works</h2>
+    <div class="rows">
+      <div class="row"><h3><span class="chip" style="background:var(--ult)">ULT</span><span class="chip" style="background:var(--pro)">PRO</span> Two Claude accounts</h3><p>Each works in its own desktop app. Bridge reads which chat is open and what it's doing, and posts handoffs into the right chat.</p></div>
+      <div class="row"><h3><span class="chip" style="background:var(--mac)">MAC</span> Qwen, on the Mac</h3><p>A local model that takes the first pass at every request: summaries, drafts, sorting. It hands off with what's left when a job needs Claude.</p></div>
+      <div class="row"><h3>One engine, two apps</h3>
+        <ul>
+          <li>The engine keeps the board in SQLite and writes a snapshot every second.</li>
+          <li><b>BridgeKit</b>, one SwiftUI module, draws the board on both devices. The Mac redraws the moment the snapshot changes.</li>
+          <li>The phone reads a copy from iCloud Drive. Its taps travel back as small request files, and a relay on the Mac runs them in about 0.1 s.</li>
+          <li>The relay accepts only <code>done</code>, <code>approve</code>, <code>deny</code>, <code>assign</code> and <code>ask</code>, and never runs a shell.</li>
+        </ul>
+      </div>
+      <div class="row"><h3>Design</h3><p>The same system as this site: a white page, black type, one red and Archivo set wide and heavy. Corners are square, rules are 2px black and figures sit in joined tombstones. The Mac sidebar is the one dark room.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <a class="btn solid" href="https://github.com/bollineni-create/bridge" target="_blank" rel="noopener">View the code on GitHub →</a>
+    <p>Screens are the real SwiftUI views, rendered with invented demo data. Bridge is a personal tool and isn't on the App Store.</p>
+  </footer>
+</main>
+</body>
+</html>
