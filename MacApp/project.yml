@@ -1,0 +1,69 @@
+name: Bridge
+options: { bundleIdPrefix: com.naren, deploymentTarget: { macOS: "27.3" } }
+settings: { base: { DEVELOPMENT_TEAM: "", CODE_SIGN_STYLE: Automatic, SWIFT_VERSION: "5.0", MARKETING_VERSION: "3.1", CURRENT_PROJECT_VERSION: "31" } }
+targets:
+  Bridge:
+    type: application
+    platform: macOS
+    sources: [App, Shared]
+    dependencies: [{ target: BridgeWidget }, { target: BridgeKit }]
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleIconFile: AppIcon
+        CFBundleDisplayName: Bridge
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleName: Bridge
+        NSSupportsLiveActivities: true
+        LSApplicationCategoryType: public.app-category.productivity
+        NSAppTransportSecurity: { NSAllowsLocalNetworking: true }
+        NSCalendarsFullAccessUsageDescription: Bridge shows your calendar to your Claude accounts and local model, and adds the events they prepare.
+        NSRemindersFullAccessUsageDescription: Bridge shows your reminders to your Claude accounts and local model, and adds or archives the ones they prepare.
+        NSLocationUsageDescription: Bridge shares where this Mac is with your Claude accounts and local model so plans fit where you are.
+        NSLocationWhenInUseUsageDescription: Bridge shares where this Mac is with your Claude accounts and local model so plans fit where you are.
+        NSContactsUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSPhotoLibraryUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSPhotoLibraryAddUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSCameraUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSMicrophoneUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSSpeechRecognitionUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSBluetoothAlwaysUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSAppleMusicUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSLocalNetworkUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSFocusStatusUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSMotionUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSHomeKitUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSDesktopFolderUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSDocumentsFolderUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSDownloadsFolderUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSRemovableVolumesUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSNetworkVolumesUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSSystemAdministrationUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSInputMonitoringUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSScreenCaptureUsageDescription: Bridge uses this only when you or one of your runners asks it to.
+        NSBonjourServices: ["_bridge._tcp"]
+        CFBundleURLTypes: [{CFBundleURLName: com.naren.bridgelive, CFBundleURLSchemes: [bridge]}]
+        NSAppleEventsUsageDescription: Bridge controls Music, Messages, Terminal and your browsers when you or one of your runners asks it to.
+    settings: { base: { PRODUCT_BUNDLE_IDENTIFIER: com.naren.bridgelive, PRODUCT_NAME: Bridge, ENABLE_HARDENED_RUNTIME: NO } }
+  BridgeWidget:
+    type: app-extension
+    platform: macOS
+    sources: [Widget, Shared]
+    info:
+      path: Widget/Info.plist
+      properties: { CFBundleDisplayName: Bridge Live, CFBundleShortVersionString: "$(MARKETING_VERSION)", CFBundleVersion: "$(CURRENT_PROJECT_VERSION)", NSExtension: { NSExtensionPointIdentifier: com.apple.widgetkit-extension } }
+    entitlements:
+      path: Widget/Widget.entitlements
+      properties: { com.apple.security.app-sandbox: true }
+    settings: { base: { PRODUCT_BUNDLE_IDENTIFIER: com.naren.bridgelive.widget } }
+  # The Bridge companion (compact window + the iPhone Duo app share it). Source: ~/Claude/Companion/Kit
+  BridgeKit:
+    type: framework
+    platform: macOS
+    sources:
+      - ../Kit/Shared
+      - ../Kit/Mac
+      - path: ../Kit/Fonts
+        buildPhase: resources
+    settings: { base: { PRODUCT_BUNDLE_IDENTIFIER: com.naren.bridgelive.kit, GENERATE_INFOPLIST_FILE: YES, SKIP_INSTALL: YES, MACOSX_DEPLOYMENT_TARGET: "15.0" } }

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Bridge</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Bridge</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.naren.bridgelive</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>bridge</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Bridge controls Music, Messages, Terminal and your browsers when you or one of your runners asks it to.</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_bridge._tcp</string>
+	</array>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Bridge shows your calendar to your Claude accounts and local model, and adds the events they prepare.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSFocusStatusUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSHomeKitUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSInputMonitoringUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Bridge shares where this Mac is with your Claude accounts and local model so plans fit where you are.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Bridge shares where this Mac is with your Claude accounts and local model so plans fit where you are.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Bridge shows your reminders to your Claude accounts and local model, and adds or archives the ones they prepare.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSSystemAdministrationUsageDescription</key>
+	<string>Bridge uses this only when you or one of your runners asks it to.</string>
+</dict>
+</plist>

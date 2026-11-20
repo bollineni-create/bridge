@@ -1,0 +1,48 @@
+# Bridge companion: BridgeKit (shared module) + the iPhone Duo app (the Mac compact window lives in Bridge.app).
+# Generate with `xcodegen` in this folder. The Mac compact view also drops into Bridge.app (see INTEGRATE.md).
+name: BridgeCompanion
+options:
+  bundleIdPrefix: com.naren
+  deploymentTarget: { macOS: "15.0", iOS: "18.0" }
+settings:
+  base:
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  BridgeKit:
+    type: framework
+    supportedDestinations: [macOS, iOS]
+    sources:
+      - Kit/Shared
+      - Kit/Mac
+      - Kit/Phone
+      - path: Kit/Fonts
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.naren.bridgekit
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
+
+  BridgePhone:
+    type: application
+    platform: iOS
+    sources: [Apps/Phone]
+    dependencies: [{ target: BridgeKit }]
+    info:
+      path: Apps/Phone/Info.plist
+      properties:
+        CFBundleDisplayName: Bridge
+        CFBundleName: Bridge
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        LSApplicationQueriesSchemes: [claude]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.naren.bridge.phone
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
