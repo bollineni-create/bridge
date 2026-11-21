@@ -33,6 +33,9 @@ public struct CompanionRoot: View {
         }
         #if os(macOS)
         .background(Button("") { s.tab = .ask; askFocused = true }.keyboardShortcut("k").opacity(0))
+        // The compact window gets the same Reply and task sheets as the main window.
+        .sheet(item: $s.sheetTask) { t in TaskSheet(t: t).environmentObject(s).frame(width: 370).frame(minHeight: 360) }
+        .background(Color.clear.sheet(item: $s.replyItem) { n in ReplySheet(n: n).environmentObject(s).frame(width: 370).frame(minHeight: 320) })
         #endif
     }
 

@@ -31,6 +31,8 @@ def allowed(args):
     cmd, rest = args[0], args[1:]
     if cmd in ("done", "resolve"):
         return len(rest) in (1, 2) and ID_RE.match(rest[0]) is not None
+    if cmd == "reply":
+        return len(rest) == 2 and rest[0].startswith("T") and ID_RE.match(rest[0]) is not None and bool(rest[1].strip())
     if cmd in ("approve", "deny"):
         return len(rest) == 1 and rest[0].startswith("A") and ID_RE.match(rest[0]) is not None
     if cmd == "assign":

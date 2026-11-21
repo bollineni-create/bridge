@@ -59,8 +59,8 @@ struct NotchView: View {
 @MainActor
 final class NotchPanel {
     static let shared = NotchPanel()
-    static let width: CGFloat = 520
-    static let k: CGFloat = 1.55
+    static let width: CGFloat = 660   // Nov 21: twice the system Live Activity (~330 pt), type kept comfortable
+    static let k: CGFloat = 1.25
     static let inset: CGFloat = 5          // gap above the panel, like the small island
     let model = NotchModel()
     var enabled = false      // off: macOS draws its own expanded island above every window, so a second panel always stacks

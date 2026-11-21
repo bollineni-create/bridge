@@ -52,6 +52,7 @@ struct PhoneRoot: View {
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
+        .sheet(item: $s.replyItem) { n in ReplySheet(n: n).environmentObject(s).presentationDetents([.medium, .large]) }
     }
 
     var split: some View {

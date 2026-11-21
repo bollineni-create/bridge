@@ -76,13 +76,15 @@ struct NeedRowP: View {
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if n.kind == .approval {
                 Button(role: .destructive) { s.deny(n) } label: { Label("Deny", systemImage: "xmark") }
-            } else if n.url != nil {
-                Button { s.open(n) } label: { Label("Open", systemImage: "safari") }.tint(.blue)
+            } else {
+                Button { s.replyItem = n } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }.tint(.indigo)
+                if n.url != nil { Button { s.open(n) } label: { Label("Open", systemImage: "safari") }.tint(.blue) }
             }
         }
         .contextMenu {
             Button(primary, systemImage: "checkmark") { s.complete(n) }
             if n.kind == .approval { Button("Deny", systemImage: "xmark", role: .destructive) { s.deny(n) } }
+            if n.kind != .approval { Button("Reply", systemImage: "arrowshape.turn.up.left") { s.replyItem = n } }
             if n.url != nil { Button("Open", systemImage: "safari") { s.open(n) } }
         }
     }

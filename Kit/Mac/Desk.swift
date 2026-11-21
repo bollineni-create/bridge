@@ -147,6 +147,7 @@ public struct DeskChrome: ViewModifier {
             }
             .animation(.easeOut(duration: 0.18), value: s.toast)
             .sheet(item: $s.sheetTask) { t in TaskSheet(t: t).environmentObject(s).frame(minWidth: 520, minHeight: 360) }
+            .background(Color.clear.sheet(item: $s.replyItem) { n in ReplySheet(n: n).environmentObject(s).frame(minWidth: 480, minHeight: 340) })
     }
 }
 #endif

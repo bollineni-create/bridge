@@ -35,6 +35,8 @@ public final class Store: ObservableObject {
     @Published var toast: String?
     /// Mac: the task whose details are open (Open on a task with no link).
     @Published var sheetTask: BTask?
+    /// The Needs-you item being answered (Reply).
+    @Published var replyItem: NeedItem?
     @Published var busy: Set<String> = []
     /// Optimistic: what the owner just finished disappears at once; the engine confirms a moment later.
     @Published var settled: Set<String> = []
@@ -97,6 +99,13 @@ public final class Store: ObservableObject {
         case .approval: act(["approve", n.id], key: n.id, ok: "Approved")
         }
     }
+    /// the owner's answer: a decision item takes it directly; a task goes back to a runner with the answer in it.
+    func reply(_ id: String, _ text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        if id.hasPrefix("N") { act(["resolve", id, t], key: id, ok: "Answered") }
+        else { act(["reply", id, t], key: id, ok: "\(id) sent to Claude with your answer") }
+    }
     func deny(_ n: NeedItem) { act(["deny", n.id], key: n.id, ok: "Denied") }
     func open(_ n: NeedItem) {
         if let u = n.url, let url = URL(string: u) { backend.open(url: url); return }
@@ -107,7 +116,7 @@ public final class Store: ObservableObject {
     }
 
     func act(_ args: [String], key: String, ok: String) {
-        let settles = ["done", "resolve", "approve", "deny"].contains(args.first ?? "")
+        let settles = ["done", "resolve", "approve", "deny", "reply"].contains(args.first ?? "")
         if settles { withAnimation(.easeOut(duration: 0.2)) { _ = settled.insert(key) }; say(ok) } else { busy.insert(key) }
         backend.run(args) { success, out in
             self.busy.remove(key)

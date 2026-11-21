@@ -179,6 +179,14 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
             DispatchQueue.global().async { try? AppProbe.focusChat(path, title).write(toFile: "/tmp/bridge-focus.txt", atomically: true, encoding: .utf8) }
             return
         }
+        if name.hasPrefix("send-check:") {   // engine hook: did the message Bridge just typed really send?  → /tmp/bridge-send-<who>.txt
+            let who = String(name.dropFirst(11))
+            let path = who == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
+            DispatchQueue.global().async {
+                if let d = try? JSONSerialization.data(withJSONObject: AppProbe.sendState(path)) { try? d.write(to: URL(fileURLWithPath: "/tmp/bridge-send-\(who).txt"), options: .atomic) }
+            }
+            return
+        }
         if name.hasPrefix("ax-dump:") {      // test hook: structure of a runner app's window
             let who = String(name.dropFirst(8))
             let path = who == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
@@ -309,7 +317,7 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
             guard let a = activity else { try? "no activity".write(toFile: "/tmp/bridge-island.err", atomically: true, encoding: .utf8); return }
             let wait = Double(name.split(separator: ":").dropFirst().first ?? "") ?? 1.6
             let st = a.content.state
-            Task { await a.update(ActivityContent(state: st, staleDate: Date().addingTimeInterval(900)), alertConfiguration: AlertConfiguration(title: "Bridge", body: "Live Activity check", sound: .default)) }
+            Task { await a.update(ActivityContent(state: st, staleDate: Date().addingTimeInterval(900), relevanceScore: 100), alertConfiguration: AlertConfiguration(title: "Bridge", body: "Live Activity check", sound: .default)) }
             DispatchQueue.main.asyncAfter(deadline: .now() + wait) {
                 let t = Process(); t.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture"); t.arguments = ["-x", "-t", "jpg", "/tmp/bridge-screen.jpg"]
                 try? t.run()
@@ -459,7 +467,7 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
         func since(_ id: String) -> Date? { s.runners.first(where: { $0.id == id })?.since.map { Date(timeIntervalSince1970: $0) } }
         st.ultraSince = since("ultra"); st.proSince = since("pro"); st.localSince = since("local")
         NotchPanel.shared.feed(st, enabled: s.settings["big_island"] == "1")      // the big island panel draws the same state
-        let content = ActivityContent(state: st, staleDate: Date().addingTimeInterval(900))
+        let content = ActivityContent(state: st, staleDate: Date().addingTimeInterval(900), relevanceScore: 100)   // Nov 21: win the notch over other (mirrored iPhone) Live Activities
         if let a = activity {
             lastKey = key
             Task { await a.update(content) }

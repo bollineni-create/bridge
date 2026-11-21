@@ -203,6 +203,36 @@ enum AppProbe {
                 "model": model, "recents": Array(recents.prefix(15)), "turns": keep, "turn_count": turns.count]
     }
 
+    /// After Bridge presses Return: is the message still sitting in the box? Counts and the usage-limit line only, never chat text.
+    static func sendState(_ path: String) -> [String: Any] {
+        var out: [String: Any] = ["nodes": 0]
+        for attempt in 0..<3 {
+            guard let r = root(path) else { return out }
+            var count = 0, composer = 0, youSaid = 0, generating = false, limit = ""
+            let names = [kAXRoleAttribute, kAXTitleAttribute, kAXValueAttribute, kAXChildrenAttribute] as CFArray
+            func walk(_ e: AXUIElement, _ d: Int) {
+                if count > 20000 || d > 90 { return }
+                count += 1
+                var vals: CFArray?
+                guard AXUIElementCopyMultipleAttributeValues(e, names, [], &vals) == .success, let v = vals as? [AnyObject], v.count == 4 else { return }
+                let role = v[0] as? String ?? "", title = v[1] as? String ?? "", value = v[2] as? String ?? ""
+                switch role {
+                case "AXTextArea": composer = max(composer, value.trimmingCharacters(in: .whitespacesAndNewlines).count)
+                case "AXStaticText": if limit.isEmpty, value.hasPrefix("Usage limit reached") { limit = String(value.prefix(120)) }
+                case "AXButton": if title == "Stop response" { generating = true }
+                case "AXHeading": if title.hasPrefix("You said:") { youSaid += 1 }
+                default: break
+                }
+                for k in (v[3] as? [AXUIElement]) ?? [] { walk(k, d + 1) }
+            }
+            for w in (attr(r, kAXWindowsAttribute) as? [AXUIElement]) ?? [] { walk(w, 0) }
+            out = ["nodes": count, "composer": composer, "generating": generating, "you_said": youSaid, "limit": limit]
+            if count > 40 { break }
+            if attempt < 2 { Thread.sleep(forTimeInterval: 0.8) }      // the tree is thin on the first read after a window comes forward
+        }
+        return out
+    }
+
     /// Mac idle time in seconds (no keyboard, mouse or trackpad input).
     static func idleSeconds() -> Double {
         CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
