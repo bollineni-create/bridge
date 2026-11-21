@@ -13,8 +13,10 @@ import CoreText
 enum D {
     // Light | dark pairs: follows the system appearance live (macOS Auto switches at sunset). Nov 21, 2026.
     static let paper = Color(light: 0xFFFFFF, dark: 0x000000)
-    static let ink = Color(light: 0x000000, dark: 0xFFFFFF)
-    static let onInk = Color(light: 0xFFFFFF, dark: 0x000000)     // text on a solid D.ink fill
+    static let ink = Color(light: 0x000000, dark: 0xE8E8E8)       // dark: off-white text, never a glaring #FFF
+    static let solid = Color(light: 0x000000, dark: 0x262626)     // solid fills (hero tile, primary buttons, toasts): dark grey at night, not white
+    static let onInk = Color(light: 0xFFFFFF, dark: 0xF2F2F2)     // text on a D.solid fill
+    static let line = Color(light: 0x000000, dark: 0x333333)      // the site's black rules and borders, dimmed at night
     static let body = Color(light: 0x262626, dark: 0xDADADA)
     static let quiet = Color(light: 0x5E5E5E, dark: 0xA8A8A8)
     static let hair = Color(light: 0xCFCFCF, dark: 0x3A3A3A)
@@ -122,8 +124,8 @@ struct SquareButton: ButtonStyle {
         configuration.label.font(D.a(13.5, 700))
             .foregroundStyle(hot ? Color.white : (solid ? D.onInk : D.ink))
             .padding(.horizontal, quiet ? 8 : 12).frame(minHeight: 30)
-            .background(hot ? D.red : (solid ? D.ink : Color.clear))
-            .overlay(Rectangle().strokeBorder(hot ? D.red : (quiet ? Color.clear : D.ink), lineWidth: 2))
+            .background(hot ? D.red : (solid ? D.solid : Color.clear))
+            .overlay(Rectangle().strokeBorder(hot ? D.red : (quiet ? Color.clear : D.line), lineWidth: 2))
             .contentShape(Rectangle())
     }
 }
@@ -144,7 +146,7 @@ struct Tombstones: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12).padding(.vertical, 11)
-                    .background(s.inverted ? D.ink : D.paper)
+                    .background(s.inverted ? D.solid : D.paper)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(StoneStyle(inverted: s.inverted)).allowsHitTesting(s.tap != nil)
@@ -152,7 +154,7 @@ struct Tombstones: View {
             }
         }
         .padding(2)
-        .background(D.ink)
+        .background(D.line)
     }
 }
 
@@ -199,13 +201,13 @@ struct UnderlineTabs: View {
                 }.buttonStyle(.plain)
             }
         }
-        .overlay(alignment: .bottom) { Rectangle().fill(D.ink).frame(height: 2).offset(y: 2) }
+        .overlay(alignment: .bottom) { Rectangle().fill(D.line).frame(height: 2).offset(y: 2) }
     }
 }
 
 struct Rule: View {
     var heavy = false
-    var color: Color = D.ink
+    var color: Color = D.line
     var body: some View { Rectangle().fill(color).frame(height: heavy ? 2 : 1) }
 }
 

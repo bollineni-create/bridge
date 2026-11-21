@@ -188,7 +188,7 @@ struct AskTurn: View {
                     }
                 }
                 .padding(12)
-                .overlay(Rectangle().strokeBorder(D.ink, lineWidth: 2))
+                .overlay(Rectangle().strokeBorder(D.line, lineWidth: 2))
                 answer
             } else {
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Routing…").font(D.a(13)).foregroundStyle(D.quiet) }
@@ -265,14 +265,14 @@ struct AskBar: View {
                 else if !m.draft.isEmpty {
                     Button { m.submit() } label: {
                         Image(systemName: "arrow.up").font(.system(size: 13, weight: .bold)).foregroundStyle(D.onInk)
-                            .frame(width: 28, height: 28).background(D.ink)
+                            .frame(width: 28, height: 28).background(D.solid)
                     }.buttonStyle(.plain)
                 } else if hint && !still {
                     Text("⌘K").font(D.monoSmall).foregroundStyle(D.quiet)
                 }
             }
             .padding(.leading, 14).padding(.trailing, 8).frame(minHeight: 44)
-            .overlay(Rectangle().strokeBorder(s.replyTarget == nil ? D.ink : D.red, lineWidth: 2))
+            .overlay(Rectangle().strokeBorder(s.replyTarget == nil ? D.line : D.red, lineWidth: 2))
             if s.replyTarget == nil {
             Menu {
                 ForEach(picks, id: \.0) { p in Button(p.1) { m.pick = p.0; m.previewRoute() } }
@@ -324,7 +324,7 @@ struct QuestionCard: View {
             if q.options.count > 4 { ScrollView { choices }.frame(height: 230) } else { choices }
         }
         .padding(12).background(D.paper)
-        .overlay(Rectangle().strokeBorder(D.ink, lineWidth: 2))
+        .overlay(Rectangle().strokeBorder(D.line, lineWidth: 2))
     }
     var choices: some View {
         VStack(spacing: 4) {
@@ -342,7 +342,7 @@ struct QuestionCard: View {
                     .padding(.horizontal, 10).padding(.vertical, 7)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
-                    .overlay(Rectangle().strokeBorder(o.value == q.default ? D.ink : D.quiet.opacity(0.35), lineWidth: 1))
+                    .overlay(Rectangle().strokeBorder(o.value == q.default ? D.line : D.quiet.opacity(0.35), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
             }

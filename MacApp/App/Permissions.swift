@@ -13,6 +13,17 @@ import IOKit.hid
 import EventKit
 import CoreLocation
 import UserNotifications
+import SQLite3
+
+/// Results from the local-network probe, written by NWBrowser's handler on the main queue.
+private final class NetFlag: @unchecked Sendable { var denied = false; var ready = false }
+
+/// Automation answers collected from several threads.
+private final class AutoCodes: @unchecked Sendable {
+    private let lock = NSLock(); private var codes: [OSStatus] = []
+    func add(_ c: OSStatus) { lock.lock(); codes.append(c); lock.unlock() }
+    var all: [OSStatus] { lock.lock(); defer { lock.unlock() }; return codes }
+}
 
 /// Every row of System Settings > Privacy & Security, with what Bridge holds today.
 /// "ask" rows show a macOS prompt; "manual" rows have no prompt on macOS, so Bridge opens the page and the owner flips the switch;
@@ -43,7 +54,7 @@ final class Permissions: ObservableObject {
         PermRow(id: "bluetooth", name: "Bluetooth", how: .ask, pane: "Privacy_Bluetooth", note: ""),
         PermRow(id: "focus", name: "Focus", how: .ask, pane: "Privacy_Focus", note: ""),
         PermRow(id: "motion", name: "Motion & Fitness", how: .ask, pane: "Privacy_Motion", note: "macOS asks only while AirPods with motion sensors are connected"),
-        PermRow(id: "localnet", name: "Local Network", how: .ask, pane: "Privacy_LocalNetwork", note: "macOS gives no way to read this one back"),
+        PermRow(id: "localnet", name: "Local Network", how: .ask, pane: "Privacy_LocalNetwork", note: "read from a test Bonjour browse"),
         PermRow(id: "files", name: "Files & Folders (Desktop, Documents, Downloads)", how: .ask, pane: "Privacy_FilesAndFolders", note: ""),
         PermRow(id: "accessibility", name: "Accessibility", how: .ask, pane: "Privacy_Accessibility", note: "typing into other apps: vault fill, Pro hand-off"),
         PermRow(id: "input", name: "Input Monitoring", how: .ask, pane: "Privacy_ListenEvent", note: ""),
@@ -63,6 +74,10 @@ final class Permissions: ObservableObject {
     private let motion = CMHeadphoneMotionManager()
     private let clm = CLLocationManager()
     private var asked = Set<String>()
+    private var lnBrowser: NWBrowser?
+    // App Management is probed once per launch: a refused write makes macOS post a "prevented from modifying apps" notice.
+    private var appMgmtDone = false
+    private var appMgmtResult: Bool?
     static let automationTargets = ["com.apple.systemevents", "com.apple.finder", "com.apple.Music", "com.apple.MobileSMS", "com.apple.Terminal", "com.apple.Safari",
                                     "com.google.Chrome", "com.apple.mail", "com.apple.Notes", "com.apple.reminders", "com.apple.iCal", "com.apple.Passwords"]
 
@@ -98,12 +113,10 @@ final class Permissions: ObservableObject {
         set("bluetooth", CBCentralManager.authorization == .allowedAlways)
         set("focus", INFocusStatusCenter.default.authorizationStatus == .authorized)
         set("motion", CMHeadphoneMotionManager.authorizationStatus() == .authorized)
-        set("localnet", nil)
+        probeLocalNetwork()
         set("accessibility", AXIsProcessTrusted())
         set("input", IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted)
         set("screen", CGPreflightScreenCaptureAccess())
-        set("appmgmt", nil)
-        set("devtools", nil)
         let home = NSHomeDirectory()
         // Open files only Full Disk Access unlocks. (The user TCC.db stays locked even with the grant on newer macOS, so it can't be the test.)
         let fdaProbe = ["/Library/Messages/chat.db", "/Library/Safari/History.db", "/Library/Safari/Bookmarks.plist", "/Library/Mail"]
@@ -117,11 +130,37 @@ final class Permissions: ObservableObject {
             return (try? h.read(upToCount: 16)) != nil
         }
         set("fda", fdaProbe.isEmpty ? nil : fdaOpen)
+        // Full Disk Access covers Desktop, Documents and Downloads. Without it, reading them would pop a prompt, so leave it unknown.
+        set("files", fdaOpen ? true : nil)
+        // Read the running-app list here on the main thread: off it, NSWorkspace can hand back an empty list,
+        // which is why Automation sat at "unknown" even with Finder open.
+        let running = Set(NSWorkspace.shared.runningApplications.compactMap { $0.bundleIdentifier })
+        let live = Permissions.automationTargets.filter { running.contains($0) }
+        let needAppMgmt = !appMgmtDone
+        // Automation: one thread per app, because AEDeterminePermissionToAutomateTarget can block on an app that isn't answering.
+        // Whatever has answered after 2.5 s decides. noErr = allowed; -1743 = switched off; -1744 = never asked (not a denial).
+        let codes = AutoCodes()
+        for b in live { DispatchQueue.global().async { codes.add(Permissions.automation(b, ask: false)) } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            let c = codes.all
+            self?.set("automation", c.contains(-1743) ? false : (c.contains(noErr) ? true : nil))
+            self?.dump()
+        }
         Task.detached {
-            let running = Set(NSWorkspace.shared.runningApplications.compactMap { $0.bundleIdentifier })
-            let live = Permissions.automationTargets.filter { running.contains($0) }
-            let ok = live.filter { Permissions.automation($0, ask: false) == noErr }.count
-            await MainActor.run { self.set("automation", live.isEmpty ? nil : ok == live.count) }
+            let tcc = Permissions.systemTCC()
+            let dev = tcc["kTCCServiceDeveloperTool"].map { $0 == 2 }
+            let tccAppMgmt = tcc["kTCCServiceSystemPolicyAppBundles"].map { $0 == 2 }
+            let probed: Bool? = (tccAppMgmt == nil && needAppMgmt) ? Permissions.appManagementProbe() : nil
+            await MainActor.run {
+                self.set("devtools", dev)
+                if let t = tccAppMgmt { self.set("appmgmt", t) }
+                else {
+                    if needAppMgmt { self.appMgmtDone = true; self.appMgmtResult = probed }
+                    self.set("appmgmt", self.appMgmtResult)
+                }
+                if self.rows.first(where: { $0.id == "fda" })?.state == "unknown", let f = tcc["kTCCServiceSystemPolicyAllFiles"] { self.set("fda", f == 2) }
+                self.dump()
+            }
         }
         for i in rows.indices where rows[i].how == .none { rows[i].state = "not available" }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.dump() }
@@ -131,6 +170,71 @@ final class Permissions: ObservableObject {
         let d = NSAppleEventDescriptor(bundleIdentifier: bundle)
         guard let p = d.aeDesc else { return OSStatus(procNotFound) }
         return AEDeterminePermissionToAutomateTarget(p, typeWildCard, typeWildCard, ask)
+    }
+
+    /// The system TCC database records grants that have no read-back API (Developer Tools, App Management, Full Disk Access).
+    /// Bridge can open it because it holds Full Disk Access. Returns service -> auth_value (2 allowed, 0 denied).
+    nonisolated static func systemTCC() -> [String: Int] {
+        guard let bid = Bundle.main.bundleIdentifier else { return [:] }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2("/Library/Application Support/com.apple.TCC/TCC.db", &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { sqlite3_close(db); return [:] }
+        defer { sqlite3_close(db) }
+        var st: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "select service, auth_value from access where client = ?", -1, &st, nil) == SQLITE_OK else { return [:] }
+        defer { sqlite3_finalize(st) }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(st, 1, bid, -1, transient)
+        var out: [String: Int] = [:]
+        while sqlite3_step(st) == SQLITE_ROW {
+            if let c = sqlite3_column_text(st, 0) { out[String(cString: c)] = Int(sqlite3_column_int(st, 1)) }
+        }
+        return out
+    }
+
+    /// App Management has no read-back API. Test it the way macOS enforces it: create a file inside another app's bundle, then remove it at once.
+    /// Picks a user-owned, non-Apple app that isn't running, so file permissions allow the write and only App Management can refuse it.
+    nonisolated static func appManagementProbe() -> Bool? {
+        let fm = FileManager.default
+        let running = Set(NSWorkspace.shared.runningApplications.compactMap { $0.bundleURL?.standardizedFileURL.path })
+        let me = Bundle.main.bundleURL.standardizedFileURL.path
+        guard let apps = try? fm.contentsOfDirectory(atPath: "/Applications") else { return nil }
+        for name in apps.sorted() where name.hasSuffix(".app") {
+            let app = "/Applications/" + name, contents = app + "/Contents"
+            guard app != me, !running.contains(app),
+                  let b = Bundle(path: app)?.bundleIdentifier, !b.hasPrefix("com.apple."),
+                  let owner = (try? fm.attributesOfItem(atPath: contents))?[.ownerAccountID] as? NSNumber, owner.uint32Value == getuid(),
+                  access(contents, W_OK) == 0 else { continue }
+            let probe = contents + "/.bridge-appmgmt-probe"
+            let fd = Darwin.open(probe, O_CREAT | O_EXCL | O_WRONLY, 0o600)
+            if fd >= 0 { close(fd); unlink(probe); return true }
+            let e = errno
+            if e == EEXIST { unlink(probe); continue }
+            return (e == EPERM || e == EACCES) ? false : nil
+        }
+        return nil
+    }
+
+    /// Local Network has no status API, but a Bonjour browse fails with PolicyDenied (-65570) when it is switched off.
+    private func probeLocalNetwork() {
+        lnBrowser?.cancel()
+        let b = NWBrowser(for: .bonjour(type: "_bridge._tcp", domain: nil), using: .tcp)
+        lnBrowser = b
+        let flag = NetFlag()
+        b.stateUpdateHandler = { st in
+            switch st {
+            case .ready: flag.ready = true
+            case .waiting(let e), .failed(let e):
+                if case .dns(let c) = e, c == -65570 { flag.denied = true }
+            default: break
+            }
+        }
+        b.start(queue: .main)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            b.cancel()
+            guard let self else { return }
+            self.set("localnet", flag.denied ? false : (flag.ready ? true : nil))
+            self.dump()
+        }
     }
 
     func open(_ row: PermRow) {
@@ -200,7 +304,13 @@ final class Permissions: ObservableObject {
 struct PermissionsCard: View {
     @EnvironmentObject var store: Store
     @ObservedObject var perms: Permissions
-    func color(_ s: String) -> Color { s == "granted" ? Ink.good : (s == "not available" ? Ink.faint : Ink.warn) }
+    // Orange only for a real "not granted". Unknown/asked are states macOS won't report, not problems.
+    func color(_ s: String) -> Color { s == "granted" ? Ink.good : (s == "not granted" ? Ink.warn : Ink.faint) }
+    func icon(_ r: PermRow) -> String {
+        if r.state == "granted" { return "checkmark.circle.fill" }
+        if r.how == .none { return "minus.circle" }
+        return r.state == "not granted" ? "exclamationmark.triangle.fill" : "questionmark.circle"
+    }
     var body: some View {
         Card(pad: 12) {
             VStack(alignment: .leading, spacing: 7) {
@@ -213,7 +323,7 @@ struct PermissionsCard: View {
                 }
                 ForEach(perms.rows) { r in
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Image(systemName: r.state == "granted" ? "checkmark.circle.fill" : (r.how == .none ? "minus.circle" : "exclamationmark.triangle.fill"))
+                        Image(systemName: icon(r))
                             .foregroundStyle(color(r.state)).font(SW.a(13.5, 400))
                         VStack(alignment: .leading, spacing: 1) {
                             Text(r.name).font(SW.a(13.5, 500))
@@ -223,7 +333,7 @@ struct PermissionsCard: View {
                         Spacer()
                         if r.how != .none && r.state != "granted" {
                             Button(r.how == .ask ? "Ask" : "Open") { Task { await perms.request(r.id, kit: store.kit, locator: store.locator) } }
-                                .buttonStyle(QuietButton(color: Ink.warn))
+                                .buttonStyle(QuietButton(color: r.state == "not granted" ? Ink.warn : Ink.faint))
                             if r.how == .ask && !r.pane.isEmpty { Button("Settings") { perms.open(r) }.buttonStyle(QuietButton()) }
                         }
                     }

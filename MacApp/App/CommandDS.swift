@@ -16,10 +16,12 @@ enum DS {
     static let raised = a(0xF2F2F2, 0x1E1E1E)
     static let fill = a(0xEEEEEE, 0x2A2A2A)
     static let separator = a(0x000000, 0x303030)
-    static let label = a(0x000000, 0xFFFFFF)
+    static let label = a(0x000000, 0xE8E8E8)   // dark: off-white
     static let label2 = a(0x5E5E5E, 0xA8A8A8)
     static let label3 = a(0x86868B, 0x7C7C80)
-    static let accent = a(0x000000, 0xFFFFFF)
+    static let accent = a(0x000000, 0xE8E8E8)
+    static let solid = a(0x000000, 0x262626)   // solid fills: dark grey at night, not white
+    static let rule = a(0x000000, 0x333333)    // 2px rules and button borders, dimmed at night
     static let accentSoft = a(0xF2F2F2, 0x1E1E1E)
     static let positive = a(0x1F7A36, 0x30D158)
     static let caution = a(0x8A6100, 0xFFD60A)
@@ -86,16 +88,16 @@ struct DSTinted: ButtonStyle {     // bollineni.co .btn: square, 2px black, red 
         configuration.label.font(SW.a(14, 700)).foregroundStyle(hot ? Color.white : DS.label)
             .padding(.horizontal, 14).frame(height: 32)
             .background(hot ? SW.red : Color.clear)
-            .overlay(Rectangle().strokeBorder(hot ? SW.red : DS.label, lineWidth: 2))
+            .overlay(Rectangle().strokeBorder(hot ? SW.red : DS.rule, lineWidth: 2))
             .contentShape(Rectangle())
     }
 }
 
 struct DSPrimary: ButtonStyle {    // bollineni.co .btn.solid
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(SW.a(15, 700)).foregroundStyle(configuration.isPressed ? Color.white : DS.onRunner)
+        configuration.label.font(SW.a(15, 700)).foregroundStyle(Color.white)
             .padding(.horizontal, 20).frame(height: 38)
-            .background(configuration.isPressed ? SW.red : DS.label)
+            .background(configuration.isPressed ? SW.red : DS.solid)
             .contentShape(Rectangle())
     }
 }

@@ -22,7 +22,7 @@ public struct CompanionRoot: View {
         .overlay(alignment: .top) {
             if let t = s.toast {
                 Text(t).font(D.a(13.5, 700)).foregroundStyle(D.onInk)
-                    .padding(.horizontal, 14).padding(.vertical, 8).background(D.ink)
+                    .padding(.horizontal, 14).padding(.vertical, 8).background(D.solid)
                     .padding(.top, 12).transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -56,7 +56,7 @@ public struct CompanionRoot: View {
     var wide: some View {
         HStack(spacing: 0) {
             NowView().frame(width: 400)
-            Rectangle().fill(D.ink).frame(width: 2)
+            Rectangle().fill(D.line).frame(width: 2)
             VStack(spacing: 0) {
                 HStack(spacing: 22) {
                     ForEach([Store.Tab.needs, .board, .ask], id: \.self) { t in
@@ -73,7 +73,7 @@ public struct CompanionRoot: View {
                     Spacer()
                 }
                 .padding(.horizontal, 24)
-                .overlay(alignment: .bottom) { Rectangle().fill(D.ink).frame(height: 2) }
+                .overlay(alignment: .bottom) { Rectangle().fill(D.line).frame(height: 2) }
                 Group {
                     switch rightTab {
                     case .board: BoardView(showTitle: false).padding(.top, 14)
@@ -116,7 +116,7 @@ struct TabBar: View {
             }
         }
         .padding(.horizontal, 12)
-        .overlay(alignment: .top) { Rectangle().fill(D.ink).frame(height: 2) }
+        .overlay(alignment: .top) { Rectangle().fill(D.line).frame(height: 2) }
     }
 }
 

@@ -125,7 +125,7 @@ struct Card<Content: View>: View {    // bollineni.co: content sits on the page 
         content
             .padding(.vertical, pad)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .top) { Rectangle().fill(Ink.ink).frame(height: 2) }
+            .overlay(alignment: .top) { Rectangle().fill(DS.rule).frame(height: 2) }
     }
 }
 

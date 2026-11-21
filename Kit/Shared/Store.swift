@@ -58,7 +58,8 @@ public final class Store: ObservableObject {
     var staleText: String {
         guard let a = backend.age() else { return "No data from \(backend.name) yet" }
         let m = Int(a / 60)
-        return m < 1 ? "Updated just now" : "Last update \(m < 90 ? "\(m) min" : "\(m / 60) h") ago"
+        let via = backend.name == "engine" ? "" : " · via \(backend.name)"
+        return (m < 1 ? "Updated just now" : "Last update \(m < 90 ? "\(m) min" : "\(m / 60) h") ago") + via
     }
 
     // MARK: derived

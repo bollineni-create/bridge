@@ -80,7 +80,7 @@ public struct DeskCommand: View {
             Rule(heavy: true)
             HStack(alignment: .top, spacing: 0) {
                 ForEach(Array(["ultra", "pro", "local"].enumerated()), id: \.1) { i, id in
-                    if i > 0 { Rectangle().fill(D.ink).frame(width: 1) }
+                    if i > 0 { Rectangle().fill(D.line).frame(width: 1) }
                     Lane(id: id, r: s.runner(id))
                         .padding(.leading, i == 0 ? 0 : 22).padding(.trailing, i == 2 ? 0 : 22)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -155,7 +155,7 @@ public struct DeskChrome: ViewModifier {
             .overlay(alignment: .bottom) {
                 if let t = s.toast {
                     Text(t).font(D.a(13.5, 700)).foregroundStyle(D.onInk)
-                        .padding(.horizontal, 14).padding(.vertical, 9).background(D.ink)
+                        .padding(.horizontal, 14).padding(.vertical, 9).background(D.solid)
                         .padding(.bottom, 86).transition(.move(edge: .bottom).combined(with: .opacity))   // clears the Ask bar
                 }
             }

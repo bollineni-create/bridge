@@ -27,15 +27,16 @@ Bridge engine (Python, not in this repo)  →  snapshot.json every second
         │                                        │
         │  bridge CLI  ←───────  Mac: Bridge.app (MacApp/) + BridgeKit (Kit/)
         │
-        └─ relay (Relay/bridge_relay.py)  ⇄  iCloud Drive: live/companion.json, live/requests, live/results
+        └─ relay (Relay/bridge_relay.py)  ⇄  Tailscale (direct, ~1 s): 127.0.0.1:7787 published to your tailnet only
+                                          ⇄  iCloud Drive (fallback, slow): live/companion.json, live/requests, live/results
                                                   │
                                          iPhone: Apps/Phone + BridgeKit
 ```
 
-- **`Kit/`, BridgeKit.** The shared SwiftUI module: style, data, and the Now, Needs, Board and Ask screens. The Mac backend watches the engine's snapshot through a file-system watcher and acts through the `bridge` CLI. The iPhone backend reads the relay's copy in iCloud Drive and drops request files.
+- **`Kit/`, BridgeKit.** The shared SwiftUI module: style, data, and the Now, Needs, Board and Ask screens. The Mac backend watches the engine's snapshot through a file-system watcher and acts through the `bridge` CLI. The iPhone backend talks to the relay directly over Tailscale when it can and falls back to iCloud Drive (the relay's copy of the board plus request files) when it can't, showing which path it used.
 - **`MacApp/`, Bridge.app.** Sidebar, feeds (Calendar, Reminders, Messages, Mail, Notes), app control, a Keychain-backed vault, the notch Live Activity, and a compact window (⌘⇧K, `bridge://compact`). Command, Board and Needs You are BridgeKit views.
-- **`Apps/Phone`.** The iPhone app. On first launch, pick the `claude-bridge` folder in iCloud Drive.
-- **`Relay/`.** Publishes a slim board for the phone and runs its requests within about 0.1 s (kqueue, no polling). It only accepts `done`, `resolve`, `approve`, `deny`, `assign`, `ask` and `route`, always as the owner and never through a shell.
+- **`Apps/Phone`.** The iPhone app. On first launch, pick the `claude-bridge` folder in iCloud Drive. For the fast path, install Tailscale on the Mac and the phone and sign both into the same tailnet; the relay publishes itself and the phone finds it on its own.
+- **`Relay/`.** Serves the phone two ways. Direct: a small HTTP server bound to 127.0.0.1 only, published to your own tailnet with `tailscale serve` (never Funnel) and locked with a pairing key the relay creates and hands to the phone through iCloud. Fallback: a slim board in iCloud Drive plus request files, run within about 0.1 s of arriving (kqueue). Either way it only accepts `done`, `resolve`, `reply`, `approve`, `deny`, `assign`, `ask`, `route` and `clarify`, always as the owner and never through a shell.
 
 The engine itself (task store, routing, feeds, vault and Qwen worker) is not included. The apps expect `~/Library/Application Support/Bridge/snapshot.json` and a `bridge` command on the PATH.
 

@@ -25,9 +25,9 @@ struct AppearanceSwitch: View {
                         Image(systemName: o.1).font(.system(size: 11, weight: .semibold))
                         Text(o.2).font(SW.a(12.5, on ? 700 : 500))
                     }
-                    .foregroundStyle(on ? Color.black : SW.nightQuiet)
+                    .foregroundStyle(on ? Color.white : SW.nightQuiet)
                     .frame(maxWidth: .infinity).frame(height: 28)
-                    .background(on ? Color.white : Color.clear)
+                    .background(on ? Color.white.opacity(0.14) : Color.clear)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -35,7 +35,7 @@ struct AppearanceSwitch: View {
             }
         }
         .padding(2)
-        .overlay(Rectangle().strokeBorder(Color.white.opacity(0.22), lineWidth: 1))
+        .overlay(Rectangle().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
         .padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 16)
         .accessibilityLabel("Appearance")
     }

@@ -2,15 +2,48 @@
 import Foundation
 import UIKit
 
-/// On the iPhone Duo. The phone can't run anything on the Mac, so it works through the iCloud bridge folder:
+/// On the iPhone Duo. Two paths to the Mac, tried in this order:
+///   Direct (Tailscale): the Mac relay's private server, found through live/phone-link.json (address + pairing key).
+///     About a second, from anywhere the phone has Tailscale on. GET /companion is the board, POST /run runs a command.
+///   iCloud (fallback, can take minutes), through the bridge folder:
 ///   live/companion.json        the board, written by the Mac relay every few seconds
 ///   live/requests/<id>.json     what the phone wants done ({"id", "args"}), picked up by the relay
 ///   live/results/<id>.json      what came back ({"ok", "out"})
 /// the owner picks the claude-bridge folder once; a security-scoped bookmark keeps access.
 @MainActor
 final class PhoneBackend: Backend {
-    let name = "iCloud"
+    /// Which path the last successful read or command used: shown with the update time.
+    var name: String { direct ? "Tailscale" : "iCloud" }
     let livePreview = false
+    private var direct = false
+    private struct Link: Codable { var url: String?; var ip_url: String?; var token: String }
+    private var link: Link? = {
+        guard let d = UserDefaults.standard.data(forKey: "bridgeDirectLink") else { return nil }
+        return try? JSONDecoder().decode(Link.self, from: d)
+    }()
+    private var linkCheckedAt = Date.distantPast
+    private var directDownUntil = Date.distantPast       // after a failure, use iCloud for a little while before trying again
+    private let session: URLSession = {
+        let c = URLSessionConfiguration.ephemeral
+        c.timeoutIntervalForRequest = 4
+        c.waitsForConnectivity = false
+        c.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: c)
+    }()
+    /// Commands can take a while on the Mac (Qwen or a sync holding the database), so they get their own, patient session.
+    private let runSession: URLSession = {
+        let c = URLSessionConfiguration.ephemeral
+        c.timeoutIntervalForRequest = 100
+        c.timeoutIntervalForResource = 120
+        c.waitsForConnectivity = false
+        return URLSession(configuration: c)
+    }()
+    /// Only these mean the request never reached the Mac, so it is safe to send it again through iCloud.
+    private static func neverArrived(_ e: Error?) -> Bool {
+        guard let u = e as? URLError else { return false }
+        return [.cannotFindHost, .cannotConnectToHost, .dnsLookupFailed, .notConnectedToInternet, .internationalRoamingOff,
+                .callIsActive, .dataNotAllowed, .secureConnectionFailed].contains(u.code)
+    }
     private(set) var folder: URL?
     private var onSnap: ((Snap) -> Void)?
     private var timer: Timer?
@@ -54,9 +87,100 @@ final class PhoneBackend: Backend {
     func age() -> TimeInterval? { generated.map { Date().timeIntervalSince1970 - $0 } }
 
     func poll() {
+        refreshLink()
+        directGet { ok in if !ok { self.pollICloud() } }
+    }
+
+    // MARK: direct path
+    private var directBases: [URL] {
+        guard let l = link, Date() >= directDownUntil else { return [] }
+        return [l.url, l.ip_url].compactMap { $0.flatMap { $0.isEmpty ? nil : URL(string: $0) } }
+    }
+    /// Re-reads phone-link.json from iCloud now and then (the Mac rewrites it if its address or key changes).
+    private func refreshLink() {
+        guard Date().timeIntervalSince(linkCheckedAt) > 30 else { return }
+        linkCheckedAt = Date()
+        // 1. A copy in the app's own Documents (pushed over USB when pairing; readable even while the phone is locked).
+        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+           let data = try? Data(contentsOf: docs.appendingPathComponent("phone-link.json")) { applyLink(data) }
+        // 2. The one the Mac keeps in the iCloud bridge folder (follows address or key changes).
+        guard let url = live("phone-link.json") else { return }
+        Self.readCoordinated(url) { data in if let data { self.applyLink(data) } }
+    }
+    private func applyLink(_ data: Data) {
+        guard let l = try? JSONDecoder().decode(Link.self, from: data), !l.token.isEmpty else { return }
+        if let enc = try? JSONEncoder().encode(l) { UserDefaults.standard.set(enc, forKey: "bridgeDirectLink") }
+        let changed = link?.token != l.token || link?.url != l.url
+        link = l
+        if changed { directDownUntil = .distantPast; direct = false }
+    }
+    private func request(_ base: URL, _ path: String, body: Data? = nil, timeout: TimeInterval) -> URLRequest {
+        var r = URLRequest(url: base.appendingPathComponent(path), timeoutInterval: timeout)
+        r.setValue("Bearer " + (link?.token ?? ""), forHTTPHeaderField: "Authorization")
+        if let body { r.httpMethod = "POST"; r.httpBody = body; r.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        return r
+    }
+    private func directGet(_ done: @escaping (Bool) -> Void) {
+        let bases = directBases
+        guard !bases.isEmpty else { done(false); return }
+        func attempt(_ i: Int) {
+            guard i < bases.count else {
+                self.direct = false
+                self.directDownUntil = Date().addingTimeInterval(20)
+                done(false); return
+            }
+            session.dataTask(with: request(bases[i], "companion", timeout: 4)) { data, resp, _ in
+                let ok = (resp as? HTTPURLResponse)?.statusCode == 200
+                let snap = ok ? data.flatMap { try? JSONDecoder().decode(Snap.self, from: $0) } : nil
+                DispatchQueue.main.async {
+                    guard let s = snap else { attempt(i + 1); return }
+                    self.direct = true
+                    self.generated = s.generated
+                    self.onSnap?(s)
+                    done(true)
+                }
+            }.resume()
+        }
+        attempt(0)
+    }
+    private func directRun(_ args: [String], _ done: @escaping (Bool, String) -> Void, fallback: @escaping () -> Void) {
+        let bases = directBases
+        guard !bases.isEmpty, let body = try? JSONSerialization.data(withJSONObject: ["args": args]) else { fallback(); return }
+        func attempt(_ i: Int) {
+            guard i < bases.count else {
+                self.direct = false
+                self.directDownUntil = Date().addingTimeInterval(20)
+                fallback(); return
+            }
+            runSession.dataTask(with: request(bases[i], "run", body: body, timeout: 100)) { data, resp, err in
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                let j = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                DispatchQueue.main.async {
+                    guard code == 200, let j else {
+                        if code == 401 { self.linkCheckedAt = .distantPast; attempt(i + 1); return }   // key changed on the Mac
+                        if code == 0 && !Self.neverArrived(err) {
+                            // It may already be running on the Mac: never send it twice. The board will show the result.
+                            self.direct = true
+                            done(true, "Sent to your Mac; it's still working on it.")
+                            return
+                        }
+                        attempt(i + 1); return
+                    }
+                    self.direct = true
+                    done((j["ok"] as? Bool) ?? false, (j["out"] as? String) ?? "")
+                    self.poll()
+                }
+            }.resume()
+        }
+        attempt(0)
+    }
+
+    // MARK: iCloud path
+    private func pollICloud() {
         guard let url = live("companion.json") else { return }
         Self.readCoordinated(url) { data in
             guard let data, let s = try? JSONDecoder().decode(Snap.self, from: data) else { return }
+            self.direct = false
             self.generated = s.generated
             self.onSnap?(s)
         }
@@ -74,6 +198,10 @@ final class PhoneBackend: Backend {
     }
 
     func run(_ args: [String], done: @escaping (Bool, String) -> Void) {
+        directRun(args, done) { self.runICloud(args, done: done) }
+    }
+
+    private func runICloud(_ args: [String], done: @escaping (Bool, String) -> Void) {
         guard let reqDir = live("requests"), let resDir = live("results") else { done(false, "ERROR: pick your claude-bridge folder first"); return }
         let id = UUID().uuidString
         let body: [String: Any] = ["id": id, "args": args, "from": "iphone", "ts": Date().timeIntervalSince1970]

@@ -62,11 +62,21 @@ struct NeedRowP: View {
             if s.busy.contains(n.id) {
                 ProgressView()
             } else {
-                Button(primary) { s.complete(n) }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.capsule)
-                    .controlSize(.small)
-                    .font(.subheadline.weight(.semibold))
+                HStack(spacing: 6) {
+                    if n.kind != .approval {
+                        Button("Reply") { s.replyTarget = n; s.tab = .ask }
+                            .buttonStyle(.bordered)
+                            .buttonBorderShape(.capsule)
+                            .controlSize(.small)
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    Button(primary) { s.complete(n) }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.small)
+                        .font(.subheadline.weight(.semibold))
+                }
+                .fixedSize()
             }
         }
         .padding(.vertical, 2)
