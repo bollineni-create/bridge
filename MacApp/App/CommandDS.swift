@@ -2,7 +2,6 @@ import SwiftUI
 import AppKit
 
 // Command pane built to the Bridge design system (CommandWindow component, Nov 19, 2026):
-//
 // Header (title, date, Today/Week, New task) · hero card (TODAY count + three runner tiles) · Needs you + Feeds · the board.
 // Colour only for runner badges, status words with a shape, the accent and the red needs-you count. No borders around cards, no shadows.
 

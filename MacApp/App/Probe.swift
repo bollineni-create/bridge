@@ -121,6 +121,140 @@ enum AppProbe {
         return ["window": count > 40, "open": open, "running": running, "generating": generating, "step": String(step.prefix(90)), "model": model]
     }
 
+    /// Every (role, title) under the app, for before/after comparisons. Titles only.
+    static func flat(_ path: String, limit: Int = 8000) -> [(AXUIElement, String, String)] {
+        guard let r = root(path) else { return [] }
+        var out: [(AXUIElement, String, String)] = []
+        let names = [kAXRoleAttribute, kAXTitleAttribute, kAXChildrenAttribute, kAXDescriptionAttribute] as CFArray
+        func walk(_ e: AXUIElement, _ d: Int) {
+            if out.count > limit || d > 80 { return }
+            var vals: CFArray?
+            guard AXUIElementCopyMultipleAttributeValues(e, names, [], &vals) == .success, let v = vals as? [AnyObject], v.count == 4 else { return }
+            let role = v[0] as? String ?? "", t = (v[1] as? String ?? ""), dsc = v[3] as? String ?? ""
+            out.append((e, role, t.isEmpty ? dsc : t))
+            for k in (v[2] as? [AXUIElement]) ?? [] { walk(k, d + 1) }
+        }
+        // everything the app shows except its menu bar (Apple menu, Recent Items, Force Quit… must never match a model or effort name);
+        // submenus such as "More models" open as their own pop-ups beside the window
+        for k in kids(r) where str(k, kAXRoleAttribute) != "AXMenuBar" { walk(k, 0) }
+        return out
+    }
+
+    /// The composer's model picker ("Model: Opus 5.5 Medium").
+    static func modelPicker(_ path: String) -> (AXUIElement, String)? {
+        flat(path).last { $0.1 == "AXPopUpButton" && $0.2.hasPrefix("Model: ") }.map { ($0.0, $0.2) }
+    }
+
+    static func escape(_ path: String) {
+        guard let a = app(path) else { return }
+        for down in [true, false] { CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: down)?.postToPid(a.processIdentifier) }
+    }
+
+    /// Test hook: open the model picker, list what appears (role + title), close it again.
+    static func modelMenuDump(_ path: String) -> String {
+        guard let (pick, title) = modelPicker(path) else { return "no model picker" }
+        let before = Set(flat(path).map { "\($0.1)|\($0.2)" })
+        AXUIElementPerformAction(pick, kAXPressAction as CFString)
+        Thread.sleep(forTimeInterval: 0.9)
+        let after = flat(path)
+        let newItems = after.filter { !before.contains("\($0.1)|\($0.2)") }
+        var lines = newItems.map { "\($0.1) \($0.2)" }
+        escape(path)
+        Thread.sleep(forTimeInterval: 0.4)
+        // one level down: each submenu-looking item, opened on its own
+        for sub in newItems where sub.1 == "AXMenuItem" && (sub.2.hasPrefix("Effort") || sub.2.hasPrefix("More models")) {
+            guard let (p2, _) = modelPicker(path) else { break }
+            AXUIElementPerformAction(p2, kAXPressAction as CFString)
+            Thread.sleep(forTimeInterval: 0.8)
+            let open1 = flat(path)
+            let mid = Set(open1.map { "\($0.1)|\($0.2)" })
+            guard let item = open1.first(where: { $0.1 == "AXMenuItem" && $0.2 == sub.2 }) else { escape(path); continue }
+            AXUIElementPerformAction(item.0, kAXPressAction as CFString)
+            Thread.sleep(forTimeInterval: 0.8)
+            let deeper = flat(path).filter { !mid.contains("\($0.1)|\($0.2)") }.map { "   \($0.1) \($0.2)" }
+            lines.append("-- inside \(sub.2):")
+            lines += deeper
+            escape(path); Thread.sleep(forTimeInterval: 0.3); escape(path); Thread.sleep(forTimeInterval: 0.4)
+        }
+        return "picker: \(title)\n" + lines.joined(separator: "\n") + "\nafter: \(modelPicker(path)?.1 ?? "?")"
+    }
+
+    /// Open the picker, then press the first menu item whose title starts with `prefix` (optionally one level down, under `via`).
+    @discardableResult
+    static func pickMenu(_ path: String, via: String?, prefix: String) -> Bool {
+        guard let (pick, _) = modelPicker(path) else { return false }
+        AXUIElementPerformAction(pick, kAXPressAction as CFString)
+        Thread.sleep(forTimeInterval: 0.7)
+        var items = flat(path).filter { $0.1 == "AXMenuItem" }
+        if let via {
+            guard let sub = items.first(where: { $0.2.hasPrefix(via) }) else { escape(path); return false }
+            AXUIElementPerformAction(sub.0, kAXPressAction as CFString)
+            Thread.sleep(forTimeInterval: 0.7)
+            items = flat(path).filter { $0.1 == "AXMenuItem" }
+        }
+        guard let hit = items.last(where: { $0.2 == prefix || $0.2.hasPrefix(prefix + " ") }) else { escape(path); escape(path); return false }
+        AXUIElementPerformAction(hit.0, kAXPressAction as CFString)
+        Thread.sleep(forTimeInterval: 0.7)
+        if modelPicker(path).map({ _ in flat(path).contains { $0.1 == "AXMenuItem" } }) == true { escape(path); Thread.sleep(forTimeInterval: 0.3) }
+        return true
+    }
+
+    /// Set the composer's model and effort ("Sonnet 5.5", "medium"). Never chooses Max on its own. Returns the picker title afterwards.
+    static func setModel(_ path: String, model: String, effort: String) -> String {
+        guard let (_, before) = modelPicker(path) else { return "no model picker" }
+        let words = ["low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra", "extra": "Extra"]
+        let eff = words[effort.lowercased()] ?? ""
+        let now = String(before.dropFirst(7))                                   // "Opus 5.5 Medium"
+        if !model.isEmpty, !now.hasPrefix(model + " ") {
+            // the current/recommended model is on the first level; the rest are under "More models"
+            if !pickMenu(path, via: nil, prefix: model) { pickMenu(path, via: "More models", prefix: model) }
+        }
+        if !eff.isEmpty, let cur = modelPicker(path)?.1, !cur.hasSuffix(" " + eff) {
+            pickMenu(path, via: "Effort", prefix: eff)
+        }
+        return modelPicker(path)?.1 ?? "?"
+    }
+
+    /// Send a message without bringing the window forward: open the chat (or a new one), set model + effort, fill the box, press Send.
+    /// Returns "ok: …", "limit: …" or "fail: …" (the engine falls back to keystrokes on fail).
+    static func post(_ path: String, text: String, newChat: Bool, chat: String, model: String, effort: String) -> String {
+        guard root(path) != nil else { return "fail: no access to the Claude window" }
+        if !chat.isEmpty {
+            let got = focusChat(path, chat)
+            if got != chat { return "fail: could not open the chat \u{201C}\(chat)\u{201D} (\(got))" }
+        } else if newChat {
+            guard let new = flat(path).first(where: { $0.1 == "AXButton" && $0.2 == "New" }) else { return "fail: no New button" }
+            AXUIElementPerformAction(new.0, kAXPressAction as CFString)
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+        let pre = sendState(path)
+        if let l = pre["limit"] as? String, !l.isEmpty { return "limit: \(l)" }
+        if (pre["composer"] as? Int ?? 0) > 0 { return "fail: there is unsent text in the message box" }
+        var picked = ""
+        if !model.isEmpty || !effort.isEmpty { picked = setModel(path, model: model, effort: effort) }
+        guard let box = flat(path).last(where: { $0.1 == "AXTextArea" && $0.2.hasPrefix("Write your prompt") })?.0 else { return "fail: no message box" }
+        AXUIElementSetAttributeValue(box, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(box, kAXValueAttribute as CFString, text as CFString)
+        Thread.sleep(forTimeInterval: 0.5)
+        var filled = (attr(box, kAXValueAttribute) as? String ?? "").count
+        if filled < max(1, text.count * 8 / 10) {
+            AXUIElementSetAttributeValue(box, kAXSelectedTextAttribute as CFString, text as CFString)
+            Thread.sleep(forTimeInterval: 0.5)
+            filled = (attr(box, kAXValueAttribute) as? String ?? "").count
+        }
+        if filled < max(1, text.count * 8 / 10) {
+            AXUIElementSetAttributeValue(box, kAXValueAttribute as CFString, "" as CFString)
+            return "fail: the message box did not take the text (\(filled)/\(text.count))"
+        }
+        guard let send = flat(path).last(where: { $0.1 == "AXButton" && $0.2 == "Send message" })?.0 else { return "fail: no Send button" }
+        AXUIElementPerformAction(send, kAXPressAction as CFString)
+        Thread.sleep(forTimeInterval: 2.0)
+        let post = sendState(path)
+        if let l = post["limit"] as? String, !l.isEmpty { return "limit: \(l)" }
+        if (post["composer"] as? Int ?? 0) > 0 && !(post["generating"] as? Bool ?? false) { return "fail: the message stayed in the box" }
+        return "ok: sent\(picked.isEmpty ? "" : " · " + picked)"
+    }
+
     /// Click the sidebar chat with this title, so a message lands in that exact chat. Returns the open chat's title afterwards.
     static func focusChat(_ path: String, _ title: String) -> String {
         guard let r = root(path) else { return "no access" }

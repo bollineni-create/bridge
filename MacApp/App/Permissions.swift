@@ -78,7 +78,7 @@ final class Permissions: ObservableObject {
     // App Management is probed once per launch: a refused write makes macOS post a "prevented from modifying apps" notice.
     private var appMgmtDone = false
     private var appMgmtResult: Bool?
-    static let automationTargets = ["com.apple.systemevents", "com.apple.finder", "com.apple.Music", "com.apple.MobileSMS", "com.apple.Terminal", "com.apple.Safari",
+    nonisolated static let automationTargets = ["com.apple.systemevents", "com.apple.finder", "com.apple.Music", "com.apple.MobileSMS", "com.apple.Terminal", "com.apple.Safari",
                                     "com.google.Chrome", "com.apple.mail", "com.apple.Notes", "com.apple.reminders", "com.apple.iCal", "com.apple.Passwords"]
 
     var missing: Int { rows.filter { $0.how != .none && $0.state == "not granted" }.count }
