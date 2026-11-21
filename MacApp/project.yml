@@ -49,10 +49,10 @@ targets:
   BridgeWidget:
     type: app-extension
     platform: macOS
-    sources: [Widget, Shared]
+    sources: [Widget, Shared, { path: ../Kit/Fonts, buildPhase: resources }]
     info:
       path: Widget/Info.plist
-      properties: { CFBundleDisplayName: Bridge Live, CFBundleShortVersionString: "$(MARKETING_VERSION)", CFBundleVersion: "$(CURRENT_PROJECT_VERSION)", NSExtension: { NSExtensionPointIdentifier: com.apple.widgetkit-extension } }
+      properties: { ATSApplicationFontsPath: ".", CFBundleDisplayName: Bridge Live, CFBundleShortVersionString: "$(MARKETING_VERSION)", CFBundleVersion: "$(CURRENT_PROJECT_VERSION)", NSExtension: { NSExtensionPointIdentifier: com.apple.widgetkit-extension } }
     entitlements:
       path: Widget/Widget.entitlements
       properties: { com.apple.security.app-sandbox: true }
