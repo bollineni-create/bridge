@@ -50,7 +50,12 @@ public final class Store: ObservableObject {
 
     init(backend: Backend) {
         self.backend = backend
-        backend.start { [weak self] s in self?.snap = s }
+        backend.start { [weak self] s in
+            guard let self else { return }
+            self.snap = s
+            // A reply target that left Needs (done elsewhere, answered, reassigned) stops being one.
+            if let r = self.replyTarget, !self.needs.contains(where: { $0.id == r.id }) { self.replyTarget = nil }
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in Task { @MainActor in self?.tick = Date() } }
     }
 
