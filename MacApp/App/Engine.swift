@@ -187,6 +187,35 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
             }
             return
         }
+        if name.hasPrefix("ax-post:") {      // engine hook: ax-post:<who>:<request.json> → <request>.result (send without taking focus)
+            let parts = name.dropFirst(8).split(separator: ":", maxSplits: 1).map(String.init)
+            let path = parts.first == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
+            let file = parts.count > 1 ? parts[1] : ""
+            DispatchQueue.global().async {
+                var res = "fail: bad request"
+                if let d = FileManager.default.contents(atPath: file), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+                    res = AppProbe.post(path, text: j["text"] as? String ?? "", newChat: j["new"] as? Bool ?? true, chat: j["chat"] as? String ?? "",
+                                        model: j["model"] as? String ?? "", effort: j["effort"] as? String ?? "")
+                }
+                try? res.write(toFile: file + ".result", atomically: true, encoding: .utf8)
+            }
+            return
+        }
+        if name.hasPrefix("ax-model:") {     // hook: ax-model:<who>:<Model name>:<effort> → /tmp/bridge-model-<who>.txt
+            let parts = name.dropFirst(9).split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+            let path = parts.first == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
+            DispatchQueue.global().async {
+                let r = AppProbe.setModel(path, model: parts.count > 1 ? parts[1] : "", effort: parts.count > 2 ? parts[2] : "")
+                try? r.write(toFile: "/tmp/bridge-model-\(parts.first ?? "x").txt", atomically: true, encoding: .utf8)
+            }
+            return
+        }
+        if name.hasPrefix("ax-menu:") {      // test hook: what the model picker offers  → /tmp/bridge-axmenu-<who>.txt
+            let who = String(name.dropFirst(8))
+            let path = who == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
+            DispatchQueue.global().async { try? AppProbe.modelMenuDump(path).write(toFile: "/tmp/bridge-axmenu-\(who).txt", atomically: true, encoding: .utf8) }
+            return
+        }
         if name.hasPrefix("ax-dump:") {      // test hook: structure of a runner app's window
             let who = String(name.dropFirst(8))
             let path = who == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
@@ -200,7 +229,7 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
         }
         if name.hasPrefix("appearance:") {   // test hook: force light or dark for this app only
             let v = String(name.dropFirst(11))
-            Appearance.set(v == "dark" || v == "light" ? v : "auto")   // same path as the sidebar switch, so the switch stays in sync
+            Appearance.set(v == "dark" || v == "light" ? v : "auto")   // same path as Settings, so the picker stays in sync
             return
         }
         if name.hasPrefix("click:") {        // test hook: one left click at x,y (points, top-left origin); needs Accessibility

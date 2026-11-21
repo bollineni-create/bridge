@@ -25,7 +25,7 @@ final class QwenChat: ObservableObject {
     @Published var error = ""
     private var job: Task<Void, Never>?
     private let file = NSHomeDirectory() + "/Library/Application Support/Bridge/qwen-chats.json"
-    static let system = "You are Qwen, the owner's assistant running privately on their own Mac inside the Bridge app. Be direct and concise; give finished answers, not plans. When live data from this Mac is supplied, use it and name the source and date. Never invent facts, figures or dates. If a request needs the web, a sign-in, a payment or an action on this Mac, say exactly what is needed and suggest handing it to Claude with the hand-off button."
+    static let system = "You are Qwen, the owner's assistant running privately on their own Mac inside the Bridge app. Be direct and concise; give finished answers, not plans. When live data from this Mac is supplied, use it and name the source and date. Never invent facts, figures or dates. If a request needs the web, a sign-in, a payment or an action on his Mac, say exactly what is needed and suggest handing it to Claude with the hand-off button."
 
     init() {
         if let d = FileManager.default.contents(atPath: file), let t = try? JSONDecoder().decode([ChatThread].self, from: d) { threads = t }

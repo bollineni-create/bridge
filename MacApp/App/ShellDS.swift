@@ -53,7 +53,7 @@ struct SidebarDS: View {
                     Capsule().fill(DS.mac).frame(width: 4, height: 20)
                 }
                 .frame(height: 20)
-                (Text("Bridge").foregroundColor(.white) + Text(".").foregroundColor(SW.red)).font(SW.display(24)).tracking(-1.2)
+                Text("Bridge\(Text(".").foregroundStyle(SW.red))").foregroundStyle(.white).font(SW.display(24)).tracking(-1.2)
             }
             .padding(.horizontal, 18).padding(.bottom, 12)
             ScrollView(.vertical, showsIndicators: true) {
@@ -76,7 +76,6 @@ struct SidebarDS: View {
                 LinearGradient(colors: [Color.black.opacity(0), Color.black], startPoint: .top, endPoint: .bottom)
                     .frame(height: 22).allowsHitTesting(false)
             }
-            AppearanceSwitch()
         }
         .frame(width: 240)
         .frame(maxHeight: .infinity)

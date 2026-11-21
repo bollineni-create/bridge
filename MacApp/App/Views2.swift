@@ -353,8 +353,8 @@ struct HealthView: View {
     func restart() {
         DispatchQueue.global().async {
             let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-            p.arguments = ["kickstart", "-k", "gui/\(getuid())/com.naren.bridge.engine"]
+            p.executableURL = URL(fileURLWithPath: "/bin/zsh")    // unload + load: a plain kickstart can come back without Full Disk Access
+            p.arguments = [NSHomeDirectory() + "/Claude/bridge/engine_watchdog.sh", "--force"]
             try? p.run()
         }
         store.say("Restarting the engine…")
@@ -395,7 +395,7 @@ struct HealthView: View {
 
 struct SettingsView: View {
     @EnvironmentObject var store: Store
-    @AppStorage(Appearance.key) private var appearance = "auto"    // shared with the sidebar switch
+    @AppStorage(Appearance.key) private var appearance = "auto"    // the only appearance control (Settings)
     func row(_ key: String, _ title: String, _ note: String) -> some View {
         Toggle(isOn: Binding(get: { store.setting(key) }, set: { store.set(key, $0) })) {
             VStack(alignment: .leading, spacing: 2) {

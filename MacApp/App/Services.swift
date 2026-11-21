@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import EventKit
 import CoreLocation
+import MapKit
 import LocalAuthentication
 import CryptoKit
 import UserNotifications
@@ -174,7 +175,6 @@ final class Kit {
 // MARK: Location
 final class Locator: NSObject, CLLocationManagerDelegate {
     let manager = CLLocationManager()
-    let geo = CLGeocoder()
     var last = ""
     var onUpdate: ((String) -> Void)?
 
@@ -193,12 +193,14 @@ final class Locator: NSObject, CLLocationManagerDelegate {
         guard let l = locs.last else { return }
         let coord = String(format: "%.4f, %.4f · ±%.0f m", l.coordinate.latitude, l.coordinate.longitude, l.horizontalAccuracy)
         let fix = l.timestamp.timeIntervalSince1970
-        geo.reverseGeocodeLocation(l) { marks, _ in
-            let pm = marks?.first
-            let place = [pm?.locality, pm?.administrativeArea].compactMap { $0 }.joined(separator: ", ")
-            let street = [pm?.subThoroughfare, pm?.thoroughfare].compactMap { $0 }.joined(separator: " ")
-            let item: [String: Any] = ["id": "here", "ts": fix, "title": place.isEmpty ? "This Mac" : place, "sub": coord, "detail": street, "tag": pm?.country ?? ""]
-            self.push(jsonString(["ok": true, "items": [item]]))
+        guard let req = MKReverseGeocodingRequest(location: l) else { return }
+        req.getMapItems { items, _ in
+            let it = items?.first
+            let reps = it?.addressRepresentations
+            let place = reps?.cityWithContext ?? ""
+            let street = it?.address?.shortAddress ?? ""
+            let item: [String: Any] = ["id": "here", "ts": fix, "title": place.isEmpty ? "This Mac" : place, "sub": coord, "detail": street, "tag": reps?.regionName ?? ""]
+            DispatchQueue.main.async { self.push(jsonString(["ok": true, "items": [item]])) }
         }
     }
 
@@ -228,7 +230,7 @@ enum Notifier {
 }
 
 // MARK: Vault. Secrets live in the login Keychain, readable by Bridge only. The engine gets names, sites and usernames; never a secret.
-final class Vault {
+final class Vault: @unchecked Sendable {   // background import only calls save(); unlock state stays on the main actor
     let service = "com.naren.bridge.vault"
     var unlockedUntil = Date.distantPast
 

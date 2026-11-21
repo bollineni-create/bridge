@@ -265,7 +265,7 @@ struct TaskRow: View {
                                 Button("Me") { store.cli(["assign", "T\(t.id)", "naren"], quiet: true) }
                                 Button("Park it") { store.cli(["assign", "T\(t.id)", "parked"], quiet: true) }
                             }.menuStyle(.borderlessButton).fixedSize()
-                            if t.live { Button("Release claim") { store.cli(["release", "T\(t.id)", "released in the app"], quiet: true) }.buttonStyle(QuietButton()) }
+                            if t.live { Button("Release claim") { store.cli(["release", "T\(t.id)", "released in Bridge"], quiet: true) }.buttonStyle(QuietButton()) }
                             Button("Mark done") { store.cli(["done", "T\(t.id)", "marked done in Bridge"], quiet: true) }.buttonStyle(QuietButton(color: Ink.good))
                             if let u = t.url, let url = URL(string: u) { Button("Open chat") { NSWorkspace.shared.open(url) }.buttonStyle(QuietButton()) }
                         }
