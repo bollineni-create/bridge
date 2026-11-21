@@ -76,10 +76,12 @@ struct SidebarDS: View {
                 LinearGradient(colors: [Color.black.opacity(0), Color.black], startPoint: .top, endPoint: .bottom)
                     .frame(height: 22).allowsHitTesting(false)
             }
+            AppearanceSwitch()
         }
         .frame(width: 240)
         .frame(maxHeight: .infinity)
         .background(Color.black)
+        .overlay(alignment: .trailing) { Rectangle().fill(Color.white.opacity(0.12)).frame(width: 1) }   // edge against a true-black page in dark mode
         .environment(\.colorScheme, .dark)     // the night room: the one dark surface, as on bollineni.co
     }
 }

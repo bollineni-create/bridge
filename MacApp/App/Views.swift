@@ -63,7 +63,7 @@ struct RootView: View {
         .onChange(of: store.paneTick) { _, _ in if let p = Pane(rawValue: store.requestedPane) { pane = p } }
         .onAppear { if let p = Pane(rawValue: store.requestedPane) { pane = p } }
         .frame(minWidth: 980, minHeight: 640)
-        .preferredColorScheme(.light)     // bollineni.co is light only; the sidebar is its night room
+        // Follows macOS appearance live (Light, Dark or Auto): every DS / Ink colour is a light|dark pair. Nov 21, 2026.
     }
 }
 

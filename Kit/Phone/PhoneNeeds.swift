@@ -77,14 +77,14 @@ struct NeedRowP: View {
             if n.kind == .approval {
                 Button(role: .destructive) { s.deny(n) } label: { Label("Deny", systemImage: "xmark") }
             } else {
-                Button { s.replyItem = n } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }.tint(.indigo)
+                Button { s.replyTarget = n; s.tab = .ask } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }.tint(.indigo)
                 if n.url != nil { Button { s.open(n) } label: { Label("Open", systemImage: "safari") }.tint(.blue) }
             }
         }
         .contextMenu {
             Button(primary, systemImage: "checkmark") { s.complete(n) }
             if n.kind == .approval { Button("Deny", systemImage: "xmark", role: .destructive) { s.deny(n) } }
-            if n.kind != .approval { Button("Reply", systemImage: "arrowshape.turn.up.left") { s.replyItem = n } }
+            if n.kind != .approval { Button("Reply", systemImage: "arrowshape.turn.up.left") { s.replyTarget = n; s.tab = .ask } }
             if n.url != nil { Button("Open", systemImage: "safari") { s.open(n) } }
         }
     }

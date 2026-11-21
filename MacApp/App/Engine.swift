@@ -134,8 +134,8 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
             probing = true
             DispatchQueue.global(qos: .utility).async {
                 var out: [String: Any] = [:]
-                if let u = AppProbe.chatRead("/Applications/Claude.app") { out["ultra"] = u }
-                if let p = AppProbe.chatRead(ClaudeApps.pro) { out["pro"] = p }
+                if let u = AppProbe.chatReadSettled("/Applications/Claude.app") { out["ultra"] = u }
+                if let p = AppProbe.chatReadSettled(ClaudeApps.pro) { out["pro"] = p }
                 if !out.isEmpty, let d = try? JSONSerialization.data(withJSONObject: out), let j = String(data: d, encoding: .utf8) { _ = runBridge(["probe"], stdin: j) }
                 Task { @MainActor in self.probing = false }
             }
@@ -200,7 +200,7 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
         }
         if name.hasPrefix("appearance:") {   // test hook: force light or dark for this app only
             let v = String(name.dropFirst(11))
-            NSApp.appearance = v == "dark" ? NSAppearance(named: .darkAqua) : (v == "light" ? NSAppearance(named: .aqua) : nil)
+            Appearance.set(v == "dark" || v == "light" ? v : "auto")   // same path as the sidebar switch, so the switch stays in sync
             return
         }
         if name.hasPrefix("click:") {        // test hook: one left click at x,y (points, top-left origin); needs Accessibility

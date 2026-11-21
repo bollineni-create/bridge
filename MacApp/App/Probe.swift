@@ -203,6 +203,17 @@ enum AppProbe {
                 "model": model, "recents": Array(recents.prefix(15)), "turns": keep, "turn_count": turns.count]
     }
 
+    /// chatRead, with one more try when the tree came back empty: the first read after a Claude window starts (or after Bridge
+    /// switches accessibility on for it) is thin, and the next slow refresh is minutes away.
+    static func chatReadSettled(_ path: String) -> [String: Any]? {
+        guard var r = chatRead(path) else { return nil }
+        for _ in 0..<2 where (r["window"] as? Bool) != true {
+            Thread.sleep(forTimeInterval: 1.2)
+            if let again = chatRead(path) { r = again }
+        }
+        return r
+    }
+
     /// After Bridge presses Return: is the message still sitting in the box? Counts and the usage-limit line only, never chat text.
     static func sendState(_ path: String) -> [String: Any] {
         var out: [String: Any] = ["nodes": 0]

@@ -395,16 +395,30 @@ struct HealthView: View {
 
 struct SettingsView: View {
     @EnvironmentObject var store: Store
+    @AppStorage(Appearance.key) private var appearance = "auto"    // shared with the sidebar switch
     func row(_ key: String, _ title: String, _ note: String) -> some View {
         Toggle(isOn: Binding(get: { store.setting(key) }, set: { store.set(key, $0) })) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(SW.a(14, 500))
                 Text(note).font(SW.a(13, 400)).foregroundStyle(Ink.faint).fixedSize(horizontal: false, vertical: true)
             }
-        }.toggleStyle(.switch).padding(.vertical, 3)
+        }.toggleStyle(.switch).tint(DS.a(0x000000, 0x30D158)).padding(.vertical, 3)   // black on paper; green on true black so "on" reads
     }
     var body: some View {
         Page(title: "Settings", subtitle: "Engine \(store.snap?.v ?? "") · model \(store.snap?.settings["model"] ?? "")") {
+            Card {
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Appearance").font(SW.a(14, 500))
+                        Text(appearance == "auto" ? "Auto follows macOS, so Bridge goes dark at sunset when your Mac does." : "Bridge stays \(appearance) whatever macOS is set to.")
+                            .font(SW.a(13, 400)).foregroundStyle(Ink.faint).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 12)
+                    DSSegmented(value: $appearance, options: [("auto", "Auto"), ("light", "Light"), ("dark", "Dark")])
+                }
+                .padding(.vertical, 3)
+                .onChange(of: appearance) { _, v in Appearance.apply(v) }
+            }
             Card {
                 VStack(alignment: .leading, spacing: 6) {
                     row("local_auto", "Qwen works tasks sent to This Mac on its own", "Anything on the board marked for This Mac starts within a second, with no Claude usage.")

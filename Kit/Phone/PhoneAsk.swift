@@ -62,14 +62,23 @@ struct PhoneAsk: View {
     var canSend: Bool { !m.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !m.sending }
 
     var composer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let q = m.question { QuestionCard(m: m, q: q) }
+            if let r = s.replyTarget { ReplyChip(n: r).padding(.horizontal, 6) }
+            composerRow
+        }
+        .onChange(of: s.replyTarget?.id) { _, id in if id != nil { m.question = nil; focused = true } }
+    }
+
+    var composerRow: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            TextField("Ask or hand off…", text: $m.draft, axis: .vertical)
+            TextField(s.replyTarget.map { "Your answer to \($0.code)…" } ?? "Ask or hand off…", text: $m.draft, axis: .vertical)
                 .lineLimit(1...6)
                 .focused($focused)
                 .padding(.horizontal, 16).padding(.vertical, 12)
                 .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22, style: .continuous))
             Button {
-                m.send()
+                m.submit()
             } label: {
                 Group {
                     if m.sending { ProgressView() } else { Image(systemName: "arrow.up").font(.body.weight(.bold)) }

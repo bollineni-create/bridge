@@ -10,7 +10,7 @@ public struct DeskCommand: View {
     var open: (String) -> Void
     public init(open: @escaping (String) -> Void = { _ in }) { self.open = open }
     @EnvironmentObject var s: Store
-    @StateObject private var ask = AskModel()
+    @ObservedObject private var ask = AskModel.shared
     @FocusState private var askFocused: Bool
 
     var upNext: [BTask] {
@@ -46,7 +46,6 @@ public struct DeskCommand: View {
             AskBar(m: ask, focused: $askFocused).padding(.horizontal, 16).padding(.vertical, 6)
         }
         .background(D.paper)
-        .environment(\.colorScheme, .light)
         .onAppear { ask.store = s }
         .background(Button("") { askFocused = true }.keyboardShortcut("k").opacity(0))
     }
@@ -119,17 +118,32 @@ public struct DeskCommand: View {
 public struct DeskBoard: View {
     public init() {}
     public var body: some View {
-        BoardView().padding(.horizontal, 16).padding(.top, 20).frame(maxWidth: 1100, alignment: .leading)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(D.paper).environment(\.colorScheme, .light)
+        DeskPage { BoardView() }
     }
 }
 public struct DeskNeeds: View {
     public init() {}
     public var body: some View {
-        NeedsView().padding(.horizontal, 16).padding(.top, 20).frame(maxWidth: 1100, alignment: .leading)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(D.paper).environment(\.colorScheme, .light)
+        DeskPage { NeedsView() }
+    }
+}
+
+/// A desktop page with the one ask box at the bottom (the same box, and the same conversation, on every page).
+struct DeskPage<Content: View>: View {
+    @EnvironmentObject var s: Store
+    @ObservedObject private var ask = AskModel.shared
+    @FocusState private var askFocused: Bool
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(spacing: 0) {
+            content.padding(.horizontal, 16).padding(.top, 20).frame(maxWidth: 1100, alignment: .leading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            Rule(heavy: true)
+            AskBar(m: ask, focused: $askFocused).padding(.horizontal, 16).padding(.vertical, 6)
+        }
+        .background(D.paper)
+        .onAppear { ask.store = s }
+        .background(Button("") { askFocused = true }.keyboardShortcut("k").opacity(0))
     }
 }
 /// Mac window chrome for the BridgeKit panes: the Store's messages (errors included) and the task sheet behind Open.
@@ -140,14 +154,13 @@ public struct DeskChrome: ViewModifier {
         content
             .overlay(alignment: .bottom) {
                 if let t = s.toast {
-                    Text(t).font(D.a(13.5, 700)).foregroundStyle(.white)
+                    Text(t).font(D.a(13.5, 700)).foregroundStyle(D.onInk)
                         .padding(.horizontal, 14).padding(.vertical, 9).background(D.ink)
                         .padding(.bottom, 86).transition(.move(edge: .bottom).combined(with: .opacity))   // clears the Ask bar
                 }
             }
             .animation(.easeOut(duration: 0.18), value: s.toast)
             .sheet(item: $s.sheetTask) { t in TaskSheet(t: t).environmentObject(s).frame(minWidth: 520, minHeight: 360) }
-            .background(Color.clear.sheet(item: $s.replyItem) { n in ReplySheet(n: n).environmentObject(s).frame(minWidth: 480, minHeight: 340) })
     }
 }
 #endif

@@ -111,6 +111,7 @@ struct RunnerBars: View {
 /// The three runners in a fixed order, with what each holds.
 struct IslandRunner { let id, code: String; let color: Color; let state, on: String; let since: Date? }
 extension Glance {
+    static func name(_ id: String) -> String { id == "ultra" ? "Ultra" : id == "pro" ? "Pro" : "Mac" }
     static func runners(_ s: S) -> [IslandRunner] {
         [IslandRunner(id: "ultra", code: "ULT", color: ultra, state: s.ultra, on: s.ultraOn, since: s.ultraSince),
          IslandRunner(id: "pro", code: "PRO", color: pro, state: s.pro, on: s.proOn, since: s.proSince),
@@ -159,25 +160,11 @@ struct IslandHead: View {
     let s: BridgeAttributes.ContentState
     var k: CGFloat = 1
     var body: some View {
-        if let r = Glance.current(s) {
-            let t = Glance.split(Glance.task(r, s))
-            HStack(alignment: .firstTextBaseline, spacing: 6 * k) {
-                Text(r.code).font(Glance.mono(12 * k)).tracking(1 * k).foregroundStyle(r.color).fixedSize()
-                if !t.id.isEmpty {
-                    Text(t.id).font(Glance.mono(12 * k, .medium)).foregroundStyle(Glance.second).fixedSize()
-                }
-                if r.state == "working", let d = r.since {
-                    // A timer Text asks for all the width there is, so it gets a fixed slot: m:ss under an hour, h:mm:ss after.
-                    Text(d, style: .timer).font(Glance.mono(12 * k, .semibold)).monospacedDigit().foregroundStyle(Color.white)
-                        .lineLimit(1).frame(width: (Date().timeIntervalSince(d) < 3540 ? 40 : 60) * k, alignment: .leading)
-                } else {
-                    Text(Glance.word(r.state)).font(Glance.mono(12 * k, .medium)).foregroundStyle(Glance.second).fixedSize()
-                }
-            }
-            .lineLimit(1)
-        } else {
-            Text(s.waiting.isEmpty ? "Now" : "Up next").font(Glance.mono(12 * k, .semibold)).textCase(.uppercase).tracking(1.5 * k).foregroundStyle(Glance.third)
-        }
+        let id = Glance.current(s).map { Glance.split(Glance.task($0, s)).id } ?? ""
+        let label = s.waiting.isEmpty || Glance.current(s) != nil ? "Now" : "Up next"
+        Text(id.isEmpty ? label : "\(label) · \(id)")
+            .font(Glance.mono(12 * k, .semibold)).textCase(.uppercase).tracking(1.2 * k)
+            .foregroundStyle(Glance.second).lineLimit(1).fixedSize()
     }
 }
 
@@ -202,26 +189,30 @@ struct IslandNeed: View {
 /// Kept for anything still asking for the old top-left count: it is the header now.
 typealias IslandCount = IslandHead
 
-/// One runner tile. Working: filled with the runner's colour. Everything else sits on the night wash with the code in
-/// its colour (grey when offline); holding / your turn reads in white, idle / ready in grey. No borders, no swatches.
+/// One runner column (design C, Nov 21): a colour bar on top (full when working or holding, faded when ready/idle,
+/// grey when offline), the code, then the timer while working or the state word.
 struct RunnerTile: View {
     let r: IslandRunner
     var k: CGFloat = 1
     var body: some View {
         let working = r.state == "working"
-        let held = r.state == "holding" || r.state == "waiting"
+        let lit = Glance.active(r.state)
         let off = Glance.off(r.state)
         Link(destination: URL(string: "bridge://open/" + r.id)!) {
-            VStack(alignment: .leading, spacing: 1 * k) {
-                Text(r.code).font(Glance.mono(10.5 * k)).tracking(0.8 * k)
-                    .foregroundStyle(working ? Color.black : (off ? Glance.third : r.color))
-                Text(Glance.word(r.state)).font(Glance.a(12.5 * k, working || held ? 700 : 500))
-                    .foregroundStyle(working ? Color.black : (held ? Color.white : (off ? Glance.third : Glance.second)))
-                    .lineLimit(1).minimumScaleFactor(0.8)
+            VStack(alignment: .leading, spacing: 5 * k) {
+                Rectangle().fill(off ? Glance.third : r.color.opacity(lit ? 1 : (r.state == "ready" ? 0.45 : 0.25)))
+                    .frame(height: 4 * k)
+                VStack(alignment: .leading, spacing: 1 * k) {
+                    Text(r.code).font(Glance.mono(11 * k)).tracking(0.8 * k).foregroundStyle(lit ? r.color : (off ? Glance.third : Glance.second))
+                    if working, let d = r.since {
+                        Text(d, style: .timer).font(Glance.a(13 * k, 700)).monospacedDigit().foregroundStyle(Color.white).lineLimit(1)
+                    } else {
+                        Text(Glance.word(r.state)).font(Glance.a(13 * k, lit ? 700 : 500))
+                            .foregroundStyle(lit ? Color.white : (off ? Glance.third : Glance.second)).lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8 * k).padding(.vertical, 5 * k)
-            .background(working ? r.color : Glance.wash)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -243,10 +234,10 @@ struct IslandLanes: View {
                 if let r = Glance.current(s) {
                     let on = Glance.task(r, s)
                     let t = Glance.split(on)
-                    let title = on.isEmpty ? "Working, no task named" : (t.title.isEmpty ? (t.id.isEmpty ? on : t.id) : t.title)
+                    let title = on.isEmpty ? "\(Glance.name(r.id)) is working" : (t.title.isEmpty ? (t.id.isEmpty ? on : t.id) : t.title)
                     Link(destination: URL(string: "bridge://open/" + r.id)!) {
                         Text(title).font(Glance.a(19 * k, 700, width: 100)).tracking(-19 * k * 0.015).foregroundStyle(Color.white)
-                            .lineLimit(2).truncationMode(.tail).lineSpacing(-1 * k)
+                            .lineLimit(1).truncationMode(.tail)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                     }
@@ -255,7 +246,7 @@ struct IslandLanes: View {
                     // Nothing running: the next thing on the board takes the hero spot, so the island stays useful (Nov 21).
                     Link(destination: URL(string: "bridge://needs")!) {
                         Text(next).font(Glance.a(19 * k, 700, width: 100)).tracking(-19 * k * 0.015).foregroundStyle(Glance.body)
-                            .lineLimit(2).truncationMode(.tail).lineSpacing(-1 * k)
+                            .lineLimit(1).truncationMode(.tail)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                     }
@@ -269,7 +260,7 @@ struct IslandLanes: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            HStack(spacing: 3 * k) {
+            HStack(alignment: .top, spacing: 10 * k) {
                 ForEach(Glance.runners(s), id: \.id) { RunnerTile(r: $0, k: k) }
             }
         }

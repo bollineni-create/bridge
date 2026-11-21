@@ -15,9 +15,9 @@ struct BridgeWidgetBundle: WidgetBundle {
 // `Big.k` scales the whole expanded island. the owner asked for it big (Nov 19). macOS fixes the island's WIDTH (about 327 pt on his
 // MacBook Pro; a wider frame is clipped, tested Nov 19) and lets the HEIGHT follow the content, so big means taller and larger type.
 // Nov 21: macOS draws the island as tall as its content (seen at ~190 pt, nothing clipped); Apple's 160 pt cap is the iPhone's.
-// 1.20 (Nov 21): comfortable type in the fixed-width system pill; the wide view is the big island (App/NotchPanel.swift).
+// 1.25 = 152 pt with design C (Nov 21). macOS SHRINKS the whole island when content passes ~160 pt (seen on his Mac), so the title is one line and k stays under that.
 enum Big {
-    static let k: CGFloat = 1.20
+    static let k: CGFloat = 1.25
 }
 
 // Glance and the island's parts live in Shared/IslandViews.swift; the app's big island panel draws the same ones.
@@ -55,14 +55,9 @@ struct BridgeLiveActivity: Widget {
             } compactTrailing: {
                 PillTrailing(s: ctx.state)
             } minimal: {
-                // The circle macOS gives Bridge while its own agent indicator holds the main pill (Nov 21):
-                // the red count when something needs the owner, else the three runner bars.
-                if ctx.state.mine > 0 {
-                    Text("\(ctx.state.mine)").font(Glance.a(14, 800, width: 112)).monospacedDigit().foregroundStyle(Color.white)
-                        .lineLimit(1).minimumScaleFactor(0.6).frame(width: 24, height: 24).background(Glance.need)
-                } else {
-                    RunnerBars(s: ctx.state, scale: 0.9)
-                }
+                // Bridge's slot while macOS's agent indicator holds the island (Nov 21). One fixed tree (no if/else):
+                // three runner squares (lit = working/holding), then the red count of things waiting on the owner.
+                PillMinimal(s: ctx.state)
             }
             .keylineTint(Glance.need.opacity(ctx.state.mine > 0 ? 1 : 0))
             .widgetURL(Glance.url(ctx.state))
@@ -75,37 +70,49 @@ struct BridgeLiveActivity: Widget {
 // Right: the red count when something needs the owner, else the running timer, else today's count.
 struct PillLeading: View {
     let s: BridgeAttributes.ContentState
+    // Resting pill, left (Nov 21): the runner bars, then who is working and on what ("PRO T41"); idle, today's count.
+    // One fixed tree with computed strings and colours: on macOS the compact pill draws blank with if/else or ForEach.
     var body: some View {
-        if let r = Glance.current(s) {
-            let id = Glance.split(Glance.task(r, s)).id
-            HStack(spacing: 4) {
-                Rectangle().fill(r.color).frame(width: 7, height: 7)
-                Text(id.isEmpty ? r.code : id).font(Glance.mono(12.5, .bold)).foregroundStyle(Color.white)
-            }
-            .lineLimit(1).fixedSize()
-        } else {
-            HStack(spacing: 3) {
-                ForEach(Glance.runners(s), id: \.id) { r in
-                    Rectangle().fill(Glance.off(r.state) ? Glance.third : r.color.opacity(Glance.active(r.state) ? 1 : 0.55))
-                        .frame(width: 6, height: 6)
-                }
-            }
+        let r = Glance.current(s)
+        let id = r.map { Glance.split(Glance.task($0, s)).id } ?? ""
+        // The compact side slot is narrow on macOS: wider content and the whole pill draws blank (Nov 21). Keep it ~40 pt.
+        let label = r.map { id.isEmpty ? $0.code : id } ?? "\(s.done)"
+        HStack(spacing: 4) {
+            Rectangle().fill(r?.color ?? Glance.third).frame(width: 7, height: 7)
+            Text(label).font(.system(size: 12.5, weight: .bold, design: .monospaced))
+                .foregroundStyle(r?.color ?? Glance.second).lineLimit(1).fixedSize()
         }
     }
 }
 
 struct PillTrailing: View {
     let s: BridgeAttributes.ContentState
+    // Resting pill, right: how many things wait on the owner, as one plain number (like macOS's agent pill). Clear: nothing.
     var body: some View {
-        if s.mine > 0 {
-            Text("\(s.mine)").font(Glance.a(13, 800, width: 112)).monospacedDigit().foregroundStyle(Color.white)
-                .lineLimit(1).fixedSize().padding(.horizontal, 5).frame(minWidth: 20, minHeight: 20).background(Glance.need)
-        } else if let r = Glance.current(s), r.state == "working", let d = r.since {
-            Text(d, style: .timer).font(Glance.mono(12.5, .semibold)).monospacedDigit().foregroundStyle(Color.white)
-                .lineLimit(1).frame(width: 40, alignment: .trailing)
-        } else {
-            Text("\(s.done)/\(Glance.total(s))").font(Glance.mono(12.5, .semibold)).monospacedDigit()
-                .foregroundStyle(Glance.second).lineLimit(1).fixedSize()
+        // Never empty: macOS drops the whole compact pill when one side has nothing to draw (seen Nov 21). Clear = a grey tick.
+        Text(s.mine > 0 ? "\(s.mine)" : "✓")
+            .font(.system(size: 14, weight: .bold)).monospacedDigit()
+            .foregroundStyle(s.mine > 0 ? Color.white : Glance.second).lineLimit(1).fixedSize()
+            .frame(minWidth: 20, minHeight: 20)   // a fixed slot: without it macOS dropped this side (Nov 21)
+    }
+}
+
+struct PillMinimal: View {
+    let s: BridgeAttributes.ContentState
+    func sq(_ r: IslandRunner) -> some View {
+        Rectangle().fill(Glance.off(r.state) ? Glance.third : r.color.opacity(Glance.active(r.state) ? 1 : 0.4)).frame(width: 6, height: 6)
+    }
+    var body: some View {
+        let rs = Glance.runners(s)
+        let need = s.mine > 0
+        HStack(spacing: 5) {
+            VStack(spacing: 2) { sq(rs[0]); sq(rs[1]); sq(rs[2]) }
+            Text(need ? "\(s.mine)" : "\(s.done)")
+                .font(.system(size: 13, weight: .heavy)).monospacedDigit()
+                .foregroundStyle(need ? Color.white : Glance.second)
+                .lineLimit(1).minimumScaleFactor(0.6)
+                .frame(minWidth: 20, minHeight: 20).padding(.horizontal, need ? 3 : 0)
+                .background(need ? Glance.need : Color.clear)
         }
     }
 }

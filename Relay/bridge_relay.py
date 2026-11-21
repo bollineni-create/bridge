@@ -26,7 +26,7 @@ def allowed(args):
     """True only for the commands the phone's buttons send, with sane arguments."""
     if not isinstance(args, list) or not args or not all(isinstance(a, str) for a in args):
         return False
-    if any(len(a) > 4000 for a in args) or len(args) > 5:
+    if any(len(a) > 4000 for a in args) or len(args) > 11:
         return False
     cmd, rest = args[0], args[1:]
     if cmd in ("done", "resolve"):
@@ -37,11 +37,23 @@ def allowed(args):
         return len(rest) == 1 and rest[0].startswith("A") and ID_RE.match(rest[0]) is not None
     if cmd == "assign":
         return len(rest) == 2 and rest[0].startswith("T") and ID_RE.match(rest[0]) is not None and rest[1] in (WHO - {"auto"}) | {"any"}
-    if cmd in ("ask", "route"):
+    if cmd in ("ask", "route", "clarify"):
         if not rest or rest[0].startswith("-"):
             return False
         flags = rest[1:]
-        return flags == [] or (len(flags) == 2 and flags[0] == "--who" and flags[1] in WHO)
+        if len(flags) % 2:
+            return False
+        for k, v in zip(flags[::2], flags[1::2]):
+            if k == "--who" and v in WHO:
+                continue
+            if k == "--where" and v in ("auto", "new", "open", "project"):
+                continue
+            if k == "--project" and re.match(r"^[a-z +]{1,40}$", v):
+                continue
+            if k == "--chat" and 0 < len(v) <= 200:
+                continue
+            return False
+        return True
     return False
 
 

@@ -35,8 +35,8 @@ public final class Store: ObservableObject {
     @Published var toast: String?
     /// Mac: the task whose details are open (Open on a task with no link).
     @Published var sheetTask: BTask?
-    /// The Needs-you item being answered (Reply).
-    @Published var replyItem: NeedItem?
+    /// The Needs-you item being answered: the ask bar at the bottom switches to "Replying to …" while this is set.
+    @Published var replyTarget: NeedItem?
     @Published var busy: Set<String> = []
     /// Optimistic: what the owner just finished disappears at once; the engine confirms a moment later.
     @Published var settled: Set<String> = []

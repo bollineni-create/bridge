@@ -11,16 +11,16 @@ enum DS {
         func c(_ v: UInt32) -> NSColor { NSColor(srgbRed: CGFloat((v >> 16) & 255) / 255, green: CGFloat((v >> 8) & 255) / 255, blue: CGFloat(v & 255) / 255, alpha: 1) }
         return Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? c(dark) : c(light) })
     }
-    static let bg = a(0xFFFFFF, 0x000000)
+    static let bg = a(0xFFFFFF, 0x000000)      // dark: true black, same as the sidebar (a hairline separates them)
     static let surface = a(0xFFFFFF, 0x000000)
-    static let raised = a(0xF2F2F2, 0x1A1A1A)
-    static let fill = a(0xEEEEEE, 0x262626)
+    static let raised = a(0xF2F2F2, 0x1E1E1E)
+    static let fill = a(0xEEEEEE, 0x2A2A2A)
     static let separator = a(0x000000, 0x303030)
     static let label = a(0x000000, 0xFFFFFF)
     static let label2 = a(0x5E5E5E, 0xA8A8A8)
     static let label3 = a(0x86868B, 0x7C7C80)
     static let accent = a(0x000000, 0xFFFFFF)
-    static let accentSoft = a(0xF2F2F2, 0x1A1A1A)
+    static let accentSoft = a(0xF2F2F2, 0x1E1E1E)
     static let positive = a(0x1F7A36, 0x30D158)
     static let caution = a(0x8A6100, 0xFFD60A)
     static let critical = a(0xD62E1F, 0xFF453A)
@@ -93,7 +93,7 @@ struct DSTinted: ButtonStyle {     // bollineni.co .btn: square, 2px black, red 
 
 struct DSPrimary: ButtonStyle {    // bollineni.co .btn.solid
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(SW.a(15, 700)).foregroundStyle(.white)
+        configuration.label.font(SW.a(15, 700)).foregroundStyle(configuration.isPressed ? Color.white : DS.onRunner)
             .padding(.horizontal, 20).frame(height: 38)
             .background(configuration.isPressed ? SW.red : DS.label)
             .contentShape(Rectangle())

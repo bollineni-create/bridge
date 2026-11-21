@@ -5,7 +5,7 @@ import SwiftUI
 public struct CompanionRoot: View {
     public init() {}
     @EnvironmentObject var s: Store
-    @StateObject private var ask = AskModel()
+    @ObservedObject private var ask = AskModel.shared
     @FocusState private var askFocused: Bool
 
     public var body: some View {
@@ -19,10 +19,9 @@ public struct CompanionRoot: View {
         #endif
         .background(D.paper)
         .foregroundStyle(D.ink)
-        .environment(\.colorScheme, .light)
         .overlay(alignment: .top) {
             if let t = s.toast {
-                Text(t).font(D.a(13.5, 700)).foregroundStyle(.white)
+                Text(t).font(D.a(13.5, 700)).foregroundStyle(D.onInk)
                     .padding(.horizontal, 14).padding(.vertical, 8).background(D.ink)
                     .padding(.top, 12).transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -35,7 +34,6 @@ public struct CompanionRoot: View {
         .background(Button("") { s.tab = .ask; askFocused = true }.keyboardShortcut("k").opacity(0))
         // The compact window gets the same Reply and task sheets as the main window.
         .sheet(item: $s.sheetTask) { t in TaskSheet(t: t).environmentObject(s).frame(width: 370).frame(minHeight: 360) }
-        .background(Color.clear.sheet(item: $s.replyItem) { n in ReplySheet(n: n).environmentObject(s).frame(width: 370).frame(minHeight: 320) })
         #endif
     }
 

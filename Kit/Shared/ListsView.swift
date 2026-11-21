@@ -49,7 +49,7 @@ struct NeedRow: View {
                     Button(n.kind == .approval ? "Approve" : "Done") { s.complete(n) }.buttonStyle(SquareButton(solid: true))
                     if n.kind == .approval { Button("Deny") { s.deny(n) }.buttonStyle(SquareButton(quiet: true)) }
                     else {
-                        Button("Reply") { s.replyItem = n }.buttonStyle(SquareButton())
+                        Button("Reply") { s.replyTarget = n }.buttonStyle(SquareButton())
                         Button("Open") { s.open(n) }.buttonStyle(SquareButton(quiet: true))
                     }
                 }
@@ -138,7 +138,6 @@ struct TaskSheet: View {
     @EnvironmentObject var s: Store
     @Environment(\.dismiss) var dismiss
     var t: BTask
-    @State private var answer = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -165,13 +164,10 @@ struct TaskSheet: View {
             if !t.isDone {
                 Rule()
                 HStack(spacing: 8) {
-                    TextField("Reply to Claude…", text: $answer, axis: .vertical)
-                        .textFieldStyle(.plain).font(D.a(14.5)).lineLimit(1...5)
-                        .padding(8).overlay(Rectangle().strokeBorder(D.ink, lineWidth: 2))
-                    Button("Send") { s.reply("T\(t.id)", answer); dismiss() }
-                        .buttonStyle(SquareButton()).disabled(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }.padding(.top, 14)
-                HStack(spacing: 8) {
+                    Button("Reply") {
+                        s.replyTarget = NeedItem(id: "T\(t.id)", kind: .task, code: "T\(t.id)", title: clean(t.title), detail: "", due: t.due, url: nil)
+                        dismiss()
+                    }.buttonStyle(SquareButton())
                     if t.forWho != "local" { Button("Assign to Mac") { s.act(["assign", "T\(t.id)", "local"], key: "T\(t.id)", ok: "T\(t.id) → Mac"); dismiss() }.buttonStyle(SquareButton()) }
                     Spacer()
                     Button("Done") { s.act(["done", "T\(t.id)", "Done in Bridge"], key: "T\(t.id)", ok: "T\(t.id) done"); dismiss() }.buttonStyle(SquareButton(solid: true))
@@ -181,48 +177,6 @@ struct TaskSheet: View {
         .padding(24)
         .frame(minWidth: 360, idealWidth: 420, minHeight: 420)
         .background(D.paper)
-    }
-}
-
-/// Answer a Needs-you item: a decision is answered in place; a task goes back to Claude with the answer.
-struct ReplySheet: View {
-    @EnvironmentObject var s: Store
-    @Environment(\.dismiss) var dismiss
-    var n: NeedItem
-    @State private var text = ""
-    @FocusState private var focused: Bool
-    var isTask: Bool { !n.id.hasPrefix("N") }
-    var ready: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(n.code).font(D.mono).foregroundStyle(D.ink)
-                Text("Reply").font(D.a(13)).foregroundStyle(D.quiet)
-                Spacer()
-                Button("Close") { dismiss() }.buttonStyle(SquareButton(quiet: true))
-            }.padding(.bottom, 14)
-            Rule(heavy: true)
-            Text(n.title).font(D.heading(22)).tracking(-1).foregroundStyle(D.ink)
-                .fixedSize(horizontal: false, vertical: true).padding(.vertical, 14)
-            if !n.detail.isEmpty { Text(n.detail).font(D.a(14)).foregroundStyle(D.quiet).padding(.bottom, 12) }
-            TextField(isTask ? "Your answer, e.g. \"keep it\" or \"cancel it\"" : "Your answer", text: $text, axis: .vertical)
-                .textFieldStyle(.plain).font(D.a(15)).lineLimit(3...8)
-                .padding(10).overlay(Rectangle().strokeBorder(D.ink, lineWidth: 2))
-                .focused($focused)
-            Text(isTask ? "Claude picks the task back up with your answer." : "Your answer goes to whoever asked.")
-                .font(D.a(12.5)).foregroundStyle(D.quiet).padding(.top, 8)
-            Spacer(minLength: 14)
-            HStack {
-                Spacer()
-                Button(isTask ? "Send to Claude" : "Send answer") { s.reply(n.id, text); dismiss() }
-                    .buttonStyle(SquareButton(solid: true)).disabled(!ready).opacity(ready ? 1 : 0.4)
-                    .keyboardShortcut(.return, modifiers: .command)
-            }
-        }
-        .padding(24)
-        .frame(minWidth: 360, idealWidth: 460, minHeight: 340)
-        .background(D.paper)
-        .onAppear { focused = true }
     }
 }
 

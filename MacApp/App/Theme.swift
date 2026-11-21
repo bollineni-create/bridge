@@ -8,9 +8,9 @@ enum Ink {
         Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light })
     }
     static let bg = adaptive(NSColor.white,   // bollineni.co paper (Swiss Tombstone, Nov 20)
-                              NSColor.black)
+                              NSColor.black)   // dark mode: true black, matches DS.bg
     static let bg2 = bg
-    static let panel = adaptive(.white, .black)
+    static let panel = adaptive(.white, NSColor(white: 0x1E / 255.0, alpha: 1))
     static let line = Color(nsColor: .separatorColor)
     static let ink = Color.primary
     static let ultra = Color.orange

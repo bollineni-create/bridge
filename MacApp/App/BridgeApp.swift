@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var windowWasOpen = false            // was the main window on screen before this activation?
     func applicationDidBecomeActive(_ n: Notification) { becameActive = Date() }
     func applicationDidResignActive(_ n: Notification) { windowWasOpen = mainWindow != nil }
-    func applicationDidFinishLaunching(_ n: Notification) { windowWasOpen = true; NotchPanel.shared.start() }
+    func applicationDidFinishLaunching(_ n: Notification) { Appearance.restore(); windowWasOpen = true; NotchPanel.shared.start() }
     var mainWindow: NSWindow? { NSApp.windows.first(where: { $0.title == "Bridge" && $0.canBecomeMain && $0.isVisible }) }
     /// A link that opens another app must not leave Bridge on screen as well: put Bridge back where it was.
     func stepBack() {

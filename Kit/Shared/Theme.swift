@@ -1,6 +1,8 @@
 import SwiftUI
 #if os(macOS)
 import AppKit
+#else
+import UIKit
 #endif
 import CoreText
 
@@ -9,12 +11,14 @@ import CoreText
 /// The only other colour belongs to the runners, and only while they work (the site's launcher rule:
 /// only the chosen app is in colour).
 enum D {
-    static let paper = Color.white
-    static let ink = Color.black
-    static let body = Color(hex: 0x262626)
-    static let quiet = Color(hex: 0x5E5E5E)
-    static let hair = Color(hex: 0xCFCFCF)
-    static let wash = Color(hex: 0xF2F2F2)
+    // Light | dark pairs: follows the system appearance live (macOS Auto switches at sunset). Nov 21, 2026.
+    static let paper = Color(light: 0xFFFFFF, dark: 0x000000)
+    static let ink = Color(light: 0x000000, dark: 0xFFFFFF)
+    static let onInk = Color(light: 0xFFFFFF, dark: 0x000000)     // text on a solid D.ink fill
+    static let body = Color(light: 0x262626, dark: 0xDADADA)
+    static let quiet = Color(light: 0x5E5E5E, dark: 0xA8A8A8)
+    static let hair = Color(light: 0xCFCFCF, dark: 0x3A3A3A)
+    static let wash = Color(light: 0xF2F2F2, dark: 0x1E1E1E)
     static let red = Color(hex: 0xD62E1F)
     // the night room (Bridge's sidebar, the unfolded rail)
     static let night = Color.black
@@ -59,6 +63,22 @@ enum D {
 
 extension Color {
     init(hex: UInt32) { self.init(red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255, blue: Double(hex & 0xFF) / 255) }
+    /// A colour that resolves per appearance (Mac and iPhone).
+    init(light: UInt32, dark: UInt32) {
+        func comps(_ v: UInt32) -> (CGFloat, CGFloat, CGFloat) { (CGFloat((v >> 16) & 255) / 255, CGFloat((v >> 8) & 255) / 255, CGFloat(v & 255) / 255) }
+        let l = comps(light), d = comps(dark)
+        #if os(macOS)
+        self.init(nsColor: NSColor(name: nil) { a in
+            let c = a.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? d : l
+            return NSColor(srgbRed: c.0, green: c.1, blue: c.2, alpha: 1)
+        })
+        #else
+        self.init(uiColor: UIColor { t in
+            let c = t.userInterfaceStyle == .dark ? d : l
+            return UIColor(red: c.0, green: c.1, blue: c.2, alpha: 1)
+        })
+        #endif
+    }
 }
 
 /// Wordmark with the site's red period: "Bridge."
@@ -100,7 +120,7 @@ struct SquareButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let hot = configuration.isPressed
         configuration.label.font(D.a(13.5, 700))
-            .foregroundStyle(hot || solid ? Color.white : D.ink)
+            .foregroundStyle(hot ? Color.white : (solid ? D.onInk : D.ink))
             .padding(.horizontal, quiet ? 8 : 12).frame(minHeight: 30)
             .background(hot ? D.red : (solid ? D.ink : Color.clear))
             .overlay(Rectangle().strokeBorder(hot ? D.red : (quiet ? Color.clear : D.ink), lineWidth: 2))
@@ -119,8 +139,8 @@ struct Tombstones: View {
                 Button { s.tap?() } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(s.figure).font(D.heading(size)).tracking(-size * 0.045).monospacedDigit()
-                            .foregroundStyle(s.inverted ? Color.white : (s.red ? D.red : D.ink))
-                        Text(s.label).font(D.a(12.5, 500)).foregroundStyle(s.inverted ? Color.white : (s.red ? D.red : D.ink))
+                            .foregroundStyle(s.inverted ? D.onInk : (s.red ? D.red : D.ink))
+                        Text(s.label).font(D.a(12.5, 500)).foregroundStyle(s.inverted ? D.onInk : (s.red ? D.red : D.ink))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12).padding(.vertical, 11)
@@ -145,7 +165,7 @@ private struct StoneStyle: ButtonStyle {
         @State private var hover = false
         var body: some View {
             c.label
-                .overlay(Rectangle().strokeBorder(inverted ? Color.white : D.red, lineWidth: 2).padding(2).opacity(hover ? 1 : 0))
+                .overlay(Rectangle().strokeBorder(inverted ? D.onInk : D.red, lineWidth: 2).padding(2).opacity(hover ? 1 : 0))
                 .opacity(c.isPressed ? 0.75 : 1)
                 .onHover { hover = $0 }
         }
