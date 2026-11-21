@@ -53,7 +53,9 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
     private var lastRequest = Date.distantPast
 
     init() {
-        for a in Activity<BridgeAttributes>.activities { Task { await a.end(nil, dismissalPolicy: .immediate) } }
+        // Nov 21 (N28): never end the Live Activity at launch. Ending it gave up Bridge's island slot on every relaunch, and a
+        // new one can only be requested while Bridge is frontmost. updateActivity() adopts the surviving activity, ends extras
+        // and pushes fresh state on the first snapshot, so a stale pill lasts about a second instead of losing the slot.
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in Task { @MainActor in self.tick() } }
         NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: kit.store, queue: .main) { _ in Task { @MainActor in await self.pushKit() } }
         Task {
