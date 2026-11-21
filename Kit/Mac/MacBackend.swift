@@ -60,6 +60,12 @@ final class MacBackend: Backend {
                 p.waitUntilExit()
                 out = String(decoding: d, as: UTF8.self); ok = p.terminationStatus == 0
             } catch { out = "ERROR: the bridge command isn't installed" }
+            // Every button press that reaches the CLI is logged, so a silent failure can't hide.
+            let logDir = NSHomeDirectory() + "/Library/Logs/Bridge"
+            try? FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true)
+            let line = "\(Date()) ok=\(ok) bridge \(args.joined(separator: " ")) -> \(out.trimmingCharacters(in: .whitespacesAndNewlines).suffix(300))\n"
+            if let h = FileHandle(forWritingAtPath: logDir + "/cli.log") { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
+            else { try? line.write(toFile: logDir + "/cli.log", atomically: true, encoding: .utf8) }
             let o = out, k = ok
             DispatchQueue.main.async { done(k, o); self.poll(force: true) }
         }

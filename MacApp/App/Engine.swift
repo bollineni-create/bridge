@@ -69,15 +69,15 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
     var probing = false
     var sweeping = false
     var chatSeen: [String: Date] = [:]
-    /// While he is away from the Mac, open each recent chat in Claude and Claude 2 in turn, read it, and put back the chat he left open.
+    /// While he is away from the Mac, open each recent chat in Claude (Ultra) and Claude Pro in turn, read it, and put back the chat he left open.
     /// That way Bridge knows every conversation, not only the one on screen.
     func sweepChats() {
         sweeping = true
         DispatchQueue.global(qos: .utility).async {
-            for (who, path) in [("ultra", "/Applications/Claude.app"), ("pro", "/Applications/Claude 2.app")] {
+            for (who, path) in [("ultra", "/Applications/Claude.app"), ("pro", ClaudeApps.pro)] {
                 guard let first = AppProbe.chatRead(path, maxChars: 1000), (first["window"] as? Bool) == true else { continue }
                 if (first["generating"] as? Bool) == true { continue }
-                if NSWorkspace.shared.frontmostApplication?.bundleURL?.path == path { continue }
+                if ClaudeApps.isFront(path) { continue }
                 let original = first["open"] as? String ?? ""
                 var n = 0
                 for title in (first["recents"] as? [String]) ?? [] {
@@ -135,7 +135,7 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
             DispatchQueue.global(qos: .utility).async {
                 var out: [String: Any] = [:]
                 if let u = AppProbe.chatRead("/Applications/Claude.app") { out["ultra"] = u }
-                if let p = AppProbe.chatRead("/Applications/Claude 2.app") { out["pro"] = p }
+                if let p = AppProbe.chatRead(ClaudeApps.pro) { out["pro"] = p }
                 if !out.isEmpty, let d = try? JSONSerialization.data(withJSONObject: out), let j = String(data: d, encoding: .utf8) { _ = runBridge(["probe"], stdin: j) }
                 Task { @MainActor in self.probing = false }
             }
@@ -174,14 +174,14 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
         if name == "perms" { perms.refresh(); return }
         if name.hasPrefix("focus-chat:") {   // engine hook: focus-chat:<ultra|pro>:<title>  → /tmp/bridge-focus.txt
             let parts = name.dropFirst(11).split(separator: ":", maxSplits: 1).map(String.init)
-            let path = parts.first == "pro" ? "/Applications/Claude 2.app" : "/Applications/Claude.app"
+            let path = parts.first == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
             let title = parts.count > 1 ? parts[1] : ""
             DispatchQueue.global().async { try? AppProbe.focusChat(path, title).write(toFile: "/tmp/bridge-focus.txt", atomically: true, encoding: .utf8) }
             return
         }
         if name.hasPrefix("ax-dump:") {      // test hook: structure of a runner app's window
             let who = String(name.dropFirst(8))
-            let path = who == "pro" ? "/Applications/Claude 2.app" : "/Applications/Claude.app"
+            let path = who == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
             DispatchQueue.global().async { try? AppProbe.dump(path).write(toFile: "/tmp/bridge-ax-\(who).txt", atomically: true, encoding: .utf8) }
             return
         }
@@ -202,6 +202,82 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
                 for t in [CGEventType.leftMouseDown, .leftMouseUp] {
                     CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: pt, mouseButton: .left)?.post(tap: .cghidEventTap)
                 }
+            }
+            return
+        }
+        if name == "views" {                 // test hook: dump the main window's NSView tree (scroll views: document size, clip bounds) to /tmp/bridge-views.txt
+            var out = ""
+            func walk(_ v: NSView, _ d: Int) {
+                var extra = ""
+                if let sv = v as? NSScrollView { extra = " SCROLL doc=\(sv.documentView?.frame ?? .zero) clipBounds=\(sv.contentView.bounds) vScroller=\(sv.hasVerticalScroller)" }
+                out += String(repeating: " ", count: d) + String(describing: type(of: v)) + " \(v.frame)" + (v.isHidden ? " HIDDEN" : "") + extra + "\n"
+                for c in v.subviews { walk(c, d + 1) }
+            }
+            if let w = NSApp.windows.first(where: { $0.title == "Bridge" && $0.contentView != nil }), let v = w.contentView { walk(v, 0) }
+            try? out.write(toFile: "/tmp/bridge-views.txt", atomically: true, encoding: .utf8)
+            return
+        }
+        if name.hasPrefix("hit:") {          // test hook: hit:x,y (window points, top-left origin) -> which view takes the event; then wheel events sent straight to the biggest scroll view under it -> /tmp/bridge-hit.txt
+            let p = name.dropFirst(4).split(separator: ",").compactMap { Double($0) }
+            var out = ""
+            if p.count >= 2, let w = NSApp.windows.first(where: { $0.title == "Bridge" && $0.contentView != nil }), let cv = w.contentView {
+                let pt = NSPoint(x: p[0], y: cv.isFlipped ? p[1] : cv.bounds.height - p[1])
+                let hit = cv.hitTest(cv.superview.map { cv.convert(pt, to: $0) } ?? pt)
+                out += "window=\(w.frame) content=\(cv.frame)\nhit chain:\n"
+                var v: NSView? = hit; var sv: NSScrollView?
+                while let x = v { out += "  " + String(describing: type(of: x)) + " \(x.frame)\n"; if sv == nil, let s = x as? NSScrollView { sv = s }; v = x.superview }
+                if let s = sv {
+                    out += "scroll view: doc=\(s.documentView?.frame ?? .zero) clip=\(s.contentView.bounds) before\n"
+                    let before = s.contentView.bounds.origin.y
+                    func send(_ phase: Int64, _ dy: Int32) {
+                        guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: dy, wheel2: 0, wheel3: 0) else { return }
+                        cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                        cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+                        if let ev = NSEvent(cgEvent: cg) { s.scrollWheel(with: ev); out += "  sent phase \(phase) dy \(dy) -> NSEvent phase \(ev.phase.rawValue) scrollingDeltaY \(ev.scrollingDeltaY) origin \(s.contentView.bounds.origin.y)\n" }
+                    }
+                    send(1, 0); for _ in 0..<6 { send(2, -40) }; send(4, 0)
+                    out += "clip origin y: \(before) -> \(s.contentView.bounds.origin.y); scrollEnabled? verticalScrollElasticity=\(s.verticalScrollElasticity.rawValue) usesPredominantAxis=\(s.usesPredominantAxisScrolling) hasV=\(s.hasVerticalScroller)\n"
+                    s.contentView.scroll(to: NSPoint(x: 0, y: 120)); s.reflectScrolledClipView(s.contentView)
+                    out += "after programmatic scroll(to: 120): \(s.contentView.bounds.origin.y)\n"
+                } else { out += "no NSScrollView in hit chain\n" }
+            }
+            try? out.write(toFile: "/tmp/bridge-hit.txt", atomically: true, encoding: .utf8)
+            return
+        }
+        if name == "evlog" {                 // test hook: log every scroll-wheel event this app receives (window point, phase, view hit, detail scroll offset after) to /tmp/bridge-events.txt for 60 s
+            try? "".write(toFile: "/tmp/bridge-events.txt", atomically: true, encoding: .utf8)
+            let mon = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { e in
+                var line = "t=\(String(format: "%.2f", e.timestamp)) phase=\(e.phase.rawValue) mom=\(e.momentumPhase.rawValue) dy=\(e.scrollingDeltaY) win=\(e.window?.title ?? "nil") loc=\(e.locationInWindow)"
+                if let cv = e.window?.contentView, let h = cv.hitTest(cv.superview.map { cv.convert(e.locationInWindow, to: $0) } ?? e.locationInWindow) {
+                    var v: NSView? = h; var chain: [String] = []; var sv: NSScrollView?
+                    while let x = v { if chain.count < 3 { chain.append(String(describing: type(of: x)).prefix(28).description) }; if sv == nil, let s = x as? NSScrollView { sv = s }; v = x.superview }
+                    line += " hit=\(chain.joined(separator: ">")) scrollDoc=\(sv?.documentView?.frame.height ?? -1) origin=\(sv?.contentView.bounds.origin.y ?? -1)"
+                    DispatchQueue.main.async { if let sv = sv, let h = FileHandle(forWritingAtPath: "/tmp/bridge-events.txt") { h.seekToEndOfFile(); h.write("   after: origin=\(sv.contentView.bounds.origin.y)\n".data(using: .utf8)!); try? h.close() } }
+                }
+                if let h = FileHandle(forWritingAtPath: "/tmp/bridge-events.txt") { h.seekToEndOfFile(); h.write((line + "\n").data(using: .utf8)!); try? h.close() }
+                return e
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) { if let m = mon { NSEvent.removeMonitor(m) } }
+            return
+        }
+        if name.hasPrefix("scroll:") {       // test hook: scroll:x,y,dy[,count] warps the pointer to x,y (points, top-left origin) and sends a trackpad-style gesture (began, changed x count, ended); negative dy = content up; needs Accessibility
+            let p = name.dropFirst(7).split(separator: ",").compactMap { Double($0) }
+            if p.count >= 3 {
+                let pt = CGPoint(x: p[0], y: p[1])
+                CGWarpMouseCursorPosition(pt); CGAssociateMouseAndMouseCursorPosition(1)
+                let n = Int(p.count > 3 ? p[3] : 10)
+                func post(_ phase: Int64, _ dy: Int32, _ after: Double) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + after) {
+                        guard let e = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: dy, wheel2: 0, wheel3: 0) else { return }
+                        e.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                        e.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+                        e.location = pt
+                        e.post(tap: .cghidEventTap)
+                    }
+                }
+                post(1, 0, 0.2)
+                for i in 0..<n { post(2, Int32(p[2]), 0.25 + 0.016 * Double(i)) }
+                post(4, 0, 0.3 + 0.016 * Double(n))
             }
             return
         }
@@ -328,7 +404,7 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
             res = await kit.perform(a)
         case "app.quit":
             let path = a.payload["path"] ?? ""
-            if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleURL?.path == path }) {
+            if let app = ClaudeApps.running(path) {
                 res = app.terminate() ? (true, "asked \(a.payload["name"] ?? "the app") to quit") : (false, "it refused to quit")
             } else { res = (true, "\(a.payload["name"] ?? "the app") was not running") }
         case "vault.fill":
@@ -369,7 +445,7 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
         let working = live.map { "\(($0.holder ?? "").capitalized) · T\($0.id) \($0.title)" }
         let waiting = open.prefix(4).map { "T\($0.id) \($0.title)" + ($0.due != nil ? " · \(dueText($0.due))" : "") }
         let key = [state(of: "ultra"), state(of: "pro"), state(of: "local"), "\(open.count)", "\(s.counts.needs)", "\(s.counts.naren)", "\(s.counts.doneToday)"].joined(separator: "|") + working.joined() + waiting.joined() + s.runners.compactMap { $0.probe?.running?.first }.joined()
-        NotchPanel.shared.enabled = s.settings["big_island"] != "0"
+        NotchPanel.shared.enabled = s.settings["big_island"] == "1"
         if key == lastKey && activity != nil && !force { return }
         func on(_ id: String) -> String {
             if let p = s.runners.first(where: { $0.id == id })?.probe, let t = p.running?.first { return t }
@@ -382,7 +458,7 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
         st.ultraOn = on("ultra"); st.proOn = on("pro"); st.localOn = on("local")
         func since(_ id: String) -> Date? { s.runners.first(where: { $0.id == id })?.since.map { Date(timeIntervalSince1970: $0) } }
         st.ultraSince = since("ultra"); st.proSince = since("pro"); st.localSince = since("local")
-        NotchPanel.shared.feed(st, enabled: s.settings["big_island"] != "0")      // the big island panel draws the same state
+        NotchPanel.shared.feed(st, enabled: s.settings["big_island"] == "1")      // the big island panel draws the same state
         let content = ActivityContent(state: st, staleDate: Date().addingTimeInterval(900))
         if let a = activity {
             lastKey = key
@@ -391,6 +467,14 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
         }
         // Nov 19, 2026: the Live Activity must come back by itself when Bridge starts in the background (relaunch, reinstall,
         // self-repair), not only when the owner brings the window forward. Retry at most every 20 s if macOS refuses.
+        // Nov 20, 2026: never more than one Live Activity. Adopt an existing one and end extras instead of requesting another.
+        let current = Activity<BridgeAttributes>.activities
+        if let first = current.first {
+            for extra in current.dropFirst() { Task { await extra.end(nil, dismissalPolicy: .immediate) } }
+            activity = first; lastKey = key; activityOn = true
+            Task { await first.update(content) }
+            return
+        }
         guard force || NSApp.isActive || Date().timeIntervalSince(lastRequest) > 20 else { return }
         lastRequest = Date()
         do {

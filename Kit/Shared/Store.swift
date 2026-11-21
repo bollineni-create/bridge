@@ -33,10 +33,14 @@ public final class Store: ObservableObject {
     @Published var snap = Snap()
     @Published var tab: Tab = .now
     @Published var toast: String?
+    /// Mac: the task whose details are open (Open on a task with no link).
+    @Published var sheetTask: BTask?
     @Published var busy: Set<String> = []
     /// Optimistic: what the owner just finished disappears at once; the engine confirms a moment later.
     @Published var settled: Set<String> = []
     @Published var tick = Date()
+    /// Set by a Command tile; BoardView opens on this tab (Moving / Open / Mine / Done) and clears it.
+    @Published public var boardJump: String?
     let backend: Backend
     private var timer: Timer?
 
@@ -95,7 +99,11 @@ public final class Store: ObservableObject {
     }
     func deny(_ n: NeedItem) { act(["deny", n.id], key: n.id, ok: "Denied") }
     func open(_ n: NeedItem) {
-        if let u = n.url, let url = URL(string: u) { backend.open(url: url) } else { tab = .board }
+        if let u = n.url, let url = URL(string: u) { backend.open(url: url); return }
+        #if os(macOS)
+        if let t = tasks.first(where: { "T\($0.id)" == n.id || (n.code == "T\($0.id)") }) { sheetTask = t; return }
+        #endif
+        tab = .board
     }
 
     func act(_ args: [String], key: String, ok: String) {
@@ -104,14 +112,16 @@ public final class Store: ObservableObject {
         backend.run(args) { success, out in
             self.busy.remove(key)
             let last = out.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "\n").last ?? ""
-            let good = success && !last.hasPrefix("ERROR")
-            if !good { withAnimation { _ = self.settled.remove(key) }; self.say(last.isEmpty ? "Didn't go through" : last) }
+            // Already closed elsewhere (phone, a runner, the CLI) is the outcome the owner asked for, not an error.
+            let already = last.hasPrefix("ALREADY DONE")
+            let good = (success && !last.hasPrefix("ERROR")) || already
+            if !good { withAnimation { _ = self.settled.remove(key) }; self.say(last.isEmpty ? "Didn't go through" : last, long: true) }
             else if !settles { self.say(ok) }
         }
     }
-    func say(_ s: String) {
+    func say(_ s: String, long: Bool = false) {
         withAnimation(.easeOut(duration: 0.18)) { toast = s }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { if self.toast == s { withAnimation(.easeOut(duration: 0.18)) { self.toast = nil } } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (long ? 8 : 2.4)) { if self.toast == s { withAnimation(.easeOut(duration: 0.18)) { self.toast = nil } } }
     }
 }
 

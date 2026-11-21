@@ -101,6 +101,12 @@ struct BoardView: View {
             }
         }
         .sheet(item: $picked) { t in TaskSheet(t: t).environmentObject(s) }
+        .onAppear { takeJump() }
+        .onChange(of: s.boardJump) { _, _ in takeJump() }
+    }
+    private func takeJump() {
+        if let j = s.boardJump, segs.contains(j) { seg = j }
+        if s.boardJump != nil { s.boardJump = nil }
     }
 }
 

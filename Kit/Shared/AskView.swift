@@ -17,6 +17,7 @@ final class AskModel: ObservableObject {
     @Published var preview: RouteInfo?
     @Published var entries: [AskEntry] = []
     @Published var sending = false
+    @Published var wantsFocus = false
     weak var store: Store?
     private var gen = 0
 

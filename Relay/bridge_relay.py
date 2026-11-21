@@ -7,7 +7,7 @@ Every few seconds it
      and answers in                                     claude-bridge/live/results/<id>.json
 
 Only a fixed list of bridge commands can run, always as the owner (the CLI's default actor), never through a shell.
-Standard library only. Runs inside the Bridge engine (relay_thread), or standalone: python3 bridge_relay.py.
+Standard library only. Runs as the LaunchAgent com.naren.bridge.relay; log at /tmp/bridge-relay.log.
 """
 import json, os, re, subprocess, sys, time
 

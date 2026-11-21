@@ -34,7 +34,7 @@ struct NowView: View {
         let c = s.snap.counts
         return Tombstones(stones: [
             .init(figure: "\(c?.doneToday ?? 0)", label: "done today", inverted: true),
-            .init(figure: "\((c?.open ?? 0) + (c?.working ?? 0))", label: "open", tap: { s.tab = .board }),
+            .init(figure: "\((c?.open ?? 0) + (c?.working ?? 0))", label: "open", tap: { s.boardJump = "Open"; s.tab = .board }),
             .init(figure: "\(s.needCount)", label: "need you", red: s.needCount > 0, tap: { s.tab = .needs }),
         ])
     }

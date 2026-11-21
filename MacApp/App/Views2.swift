@@ -413,7 +413,7 @@ struct SettingsView: View {
                     row("vault_auto", "Fill logins without asking me", "Off: every vault fill waits in Needs You.")
                     row("music_on", "Music lane", "Now playing and controls. macOS asks once whether Bridge may control Music.")
                     row("live_activity", "Live Activity in the menu bar", "Who is working and what is open, next to the clock.")
-                    row("read_windows", "Read what Claude and Claude 2 are doing", "Shows the real chat title and step on each card. Live while Bridge is in front, every 5 minutes otherwise, because each read makes macOS show its own “Bridge is accessing…” pill beside the Live Activity for about a minute.")
+                    row("read_windows", "Read what Claude and Claude Pro are doing", "Shows the real chat title and step on each card. Live while Bridge is in front, every 5 minutes otherwise, because each read makes macOS show its own “Bridge is accessing…” pill beside the Live Activity for about a minute.")
                 }
             }
             Card(pad: 12) {
@@ -521,7 +521,7 @@ struct ContextView: View {
                 VStack(spacing: 8) {
                     row("Claude · Ultra", connected("/Library/Application Support/Claude/claude_desktop_config.json"), "Bridge connector")
                     Divider()
-                    row("Claude 2 · Pro", connected("/Library/Application Support/Duplex/claude-2/data/claude_desktop_config.json"), "Bridge connector")
+                    row("Claude Pro", connected("/Library/Application Support/Duplex/claude-2/data/claude_desktop_config.json"), "Bridge connector")
                     Divider()
                     row("This Mac · Qwen", store.engineLive, "reads the engine directly")
                 }

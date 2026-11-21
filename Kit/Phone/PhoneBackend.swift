@@ -137,5 +137,6 @@ public final class PhoneLink: ObservableObject {
     init(_ b: PhoneBackend) { self.b = b; hasFolder = b.hasFolder }
     public func setFolder(_ url: URL) { b.setFolder(url); hasFolder = b.hasFolder }
     public func refresh() { b.poll() }
+    public func pull() async { b.poll(); try? await Task.sleep(for: .milliseconds(700)) }
 }
 #endif

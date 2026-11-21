@@ -206,7 +206,7 @@ struct CommandDSView: View {
         }
         for t in s.tasks where !t.isDone && t.forWho == "naren" {
             r.append(NeedRow(id: "t\(t.id)", title: t.title, sub: "T\(t.id)" + (t.due != nil ? " · due \(dueText(t.due))" : "") + (t.overdue ? " · overdue" : ""), button: t.url != nil ? "Open" : "Done") {
-                if let u = t.url.flatMap({ URL(string: $0) }) { NSWorkspace.shared.open(u) } else { store.cli(["done", "T\(t.id)", "marked done"], quiet: true) }
+                if let u = t.url.flatMap({ URL(string: $0) }) { NSWorkspace.shared.open(u) } else { store.cli(["done", "T\(t.id)", "marked done in Bridge"], quiet: true) }
             })
         }
         return r

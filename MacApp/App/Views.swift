@@ -47,7 +47,7 @@ struct RootView: View {
         // Design-system shell (ShellDS.swift): floating sidebar panel + detail on warm paper, filling the window at any size.
         HStack(spacing: 0) {
             SidebarDS(pane: $pane)
-            DetailView(pane: pane).frame(maxWidth: .infinity, maxHeight: .infinity)
+            DetailView(pane: pane, go: { pane = $0 }).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(DS.bg)
         .ignoresSafeArea(.container, edges: .top)
@@ -116,6 +116,7 @@ struct Sidebar: View {
 struct DetailView: View {
     @EnvironmentObject var store: Store
     var pane: Pane
+    var go: (Pane) -> Void = { _ in }
     var body: some View {
         if store.snap == nil {
             Page(title: "Bridge", subtitle: "Waiting for the engine") {
@@ -125,7 +126,7 @@ struct DetailView: View {
             VStack(spacing: 0) {
             StatusStrip()
             switch pane {
-            case .command: KitPane(which: "command")   // BridgeKit (KitPanes.swift); CommandDSView stays for reference   // design-system Command pane (CommandDS.swift); the old CommandView stays for reference
+            case .command: KitPane(which: "command", open: { go($0 == "needs" ? .needs : .board) })   // BridgeKit (KitPanes.swift); CommandDSView stays for reference   // design-system Command pane (CommandDS.swift); the old CommandView stays for reference
             case .board: KitPane(which: "board")
             case .needs: KitPane(which: "needs")
             case .apps: AppsView()
@@ -265,7 +266,7 @@ struct TaskRow: View {
                                 Button("Park it") { store.cli(["assign", "T\(t.id)", "parked"], quiet: true) }
                             }.menuStyle(.borderlessButton).fixedSize()
                             if t.live { Button("Release claim") { store.cli(["release", "T\(t.id)", "released in the app"], quiet: true) }.buttonStyle(QuietButton()) }
-                            Button("Mark done") { store.cli(["done", "T\(t.id)", "marked done"], quiet: true) }.buttonStyle(QuietButton(color: Ink.good))
+                            Button("Mark done") { store.cli(["done", "T\(t.id)", "marked done in Bridge"], quiet: true) }.buttonStyle(QuietButton(color: Ink.good))
                             if let u = t.url, let url = URL(string: u) { Button("Open chat") { NSWorkspace.shared.open(url) }.buttonStyle(QuietButton()) }
                         }
                     }

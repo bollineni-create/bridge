@@ -3,7 +3,7 @@
 name: BridgeCompanion
 options:
   bundleIdPrefix: com.naren
-  deploymentTarget: { macOS: "15.0", iOS: "18.0" }
+  deploymentTarget: { macOS: "15.0", iOS: "26.0" }
 settings:
   base:
     DEVELOPMENT_TEAM: ""

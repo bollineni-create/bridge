@@ -38,9 +38,12 @@ struct NotchView: View {
                 IslandLanes(s: s, k: k)
             }
         }
-        .padding(.horizontal, 24).padding(.top, 2).padding(.bottom, 22)
+        // Nov 20, 2026: same design as the small Live Activity (floating, all four corners round, a small gap above),
+        // only at NotchPanel.width / NotchPanel.k.
+        .padding(.horizontal, 22).padding(.top, 4).padding(.bottom, 20)
         .frame(width: NotchPanel.width, alignment: .leading)
-        .background(Color.black, in: UnevenRoundedRectangle(bottomLeadingRadius: 36, bottomTrailingRadius: 36, style: .continuous))
+        .background(Color.black, in: RoundedRectangle(cornerRadius: 44, style: .continuous))
+        .padding(.top, NotchPanel.inset)
         .opacity(model.open ? 1 : 0)
         .scaleEffect(x: model.open ? 1 : 0.4, y: model.open ? 1 : 0.15, anchor: .top)
         .animation(.spring(response: 0.34, dampingFraction: 0.84), value: model.open)
@@ -58,8 +61,9 @@ final class NotchPanel {
     static let shared = NotchPanel()
     static let width: CGFloat = 520
     static let k: CGFloat = 1.55
+    static let inset: CGFloat = 5          // gap above the panel, like the small island
     let model = NotchModel()
-    var enabled = true
+    var enabled = false      // off: macOS draws its own expanded island above every window, so a second panel always stacks
     private var panel: NSPanel?
     private var timer: Timer?
     private var outside = 0
@@ -183,7 +187,8 @@ final class NotchPanel {
         p.isOpaque = false
         p.backgroundColor = .clear
         p.hasShadow = false
-        p.level = .screenSaver      // above the system Live Activity pill, so it does not draw through the top row
+        // Above everything, including macOS's own expanded Live Activity, so the two never show stacked.
+        p.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
         p.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         p.hidesOnDeactivate = false
         p.isMovable = false

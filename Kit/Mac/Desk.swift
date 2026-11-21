@@ -6,7 +6,9 @@ import SwiftUI
 
 /// Command: the day in tombstones, the three runners side by side, then what needs you and what is next.
 public struct DeskCommand: View {
-    public init() {}
+    /// Called with "board" or "needs" when a tile or the red badge is clicked; the host window switches page.
+    var open: (String) -> Void
+    public init(open: @escaping (String) -> Void = { _ in }) { self.open = open }
     @EnvironmentObject var s: Store
     @StateObject private var ask = AskModel()
     @FocusState private var askFocused: Bool
@@ -36,6 +38,10 @@ public struct DeskCommand: View {
                 .padding(.horizontal, 40).padding(.top, 28).padding(.bottom, 24)
                 .frame(maxWidth: 1240, alignment: .leading)
             }
+            .overlay(alignment: .bottom) {
+                LinearGradient(colors: [D.paper.opacity(0), D.paper], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 34).allowsHitTesting(false)
+            }
             Rule(heavy: true)
             AskBar(m: ask, focused: $askFocused).padding(.horizontal, 16).padding(.vertical, 6)
         }
@@ -50,7 +56,10 @@ public struct DeskCommand: View {
             Text("Command").font(D.display(44)).tracking(-2.2).foregroundStyle(D.ink)
             Text(Date().formatted(.dateTime.weekday(.wide).month(.wide).day())).font(D.a(16)).foregroundStyle(D.quiet)
             Spacer()
-            if s.needCount > 0 { RedCount(n: s.needCount, words: true) }
+            if s.needCount > 0 {
+                Button { open("needs") } label: { RedCount(n: s.needCount, words: true) }
+                    .buttonStyle(.plain).pointerOnHover().help("Open Needs you")
+            }
             else { Text("All clear").font(D.a(14, 600)).foregroundStyle(D.quiet) }
         }
     }
@@ -58,12 +67,14 @@ public struct DeskCommand: View {
     var stones: some View {
         let c = s.snap.counts
         return Tombstones(stones: [
-            .init(figure: "\(c?.doneToday ?? 0)", label: "done today", inverted: true),
-            .init(figure: "\(c?.working ?? 0)", label: "moving"),
-            .init(figure: "\(c?.open ?? 0)", label: "open"),
-            .init(figure: "\(s.needCount)", label: "need you", red: s.needCount > 0),
+            .init(figure: "\(c?.doneToday ?? 0)", label: "done today", inverted: true, tap: { board("Done") }),
+            .init(figure: "\(c?.working ?? 0)", label: "moving", tap: { board("Moving") }),
+            .init(figure: "\(c?.open ?? 0)", label: "open", tap: { board("Open") }),
+            .init(figure: "\(s.needCount)", label: "need you", red: s.needCount > 0, tap: { open("needs") }),
         ], size: 46)
     }
+
+    private func board(_ seg: String) { s.boardJump = seg; open("board") }
 
     var lanes: some View {
         VStack(spacing: 0) {
@@ -119,6 +130,23 @@ public struct DeskNeeds: View {
         NeedsView().padding(.horizontal, 16).padding(.top, 20).frame(maxWidth: 1100, alignment: .leading)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(D.paper).environment(\.colorScheme, .light)
+    }
+}
+/// Mac window chrome for the BridgeKit panes: the Store's messages (errors included) and the task sheet behind Open.
+public struct DeskChrome: ViewModifier {
+    @EnvironmentObject var s: Store
+    public init() {}
+    public func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .bottom) {
+                if let t = s.toast {
+                    Text(t).font(D.a(13.5, 700)).foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 9).background(D.ink)
+                        .padding(.bottom, 86).transition(.move(edge: .bottom).combined(with: .opacity))   // clears the Ask bar
+                }
+            }
+            .animation(.easeOut(duration: 0.18), value: s.toast)
+            .sheet(item: $s.sheetTask) { t in TaskSheet(t: t).environmentObject(s).frame(minWidth: 520, minHeight: 360) }
     }
 }
 #endif

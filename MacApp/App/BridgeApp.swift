@@ -50,10 +50,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             o(); did = "compact window"
         } else if u.host == "open" {            // bridge://open/ultra | pro | local  → that runner's own app
             let who = u.lastPathComponent
-            let app = who == "ultra" ? "/Applications/Claude.app" : (who == "pro" ? "/Applications/Claude 2.app" : "")
-            if !app.isEmpty, FileManager.default.fileExists(atPath: app) {
+            let app = who == "ultra" ? "/Applications/Claude.app" : (who == "pro" ? ClaudeApps.pro : "")
+            if !app.isEmpty, let r = ClaudeApps.running(app) {           // already open: bring that account's own window forward
+                stepBack()
+                r.activate()
+                did = "focused \(app)"
+            } else if !app.isEmpty, FileManager.default.fileExists(atPath: app) {
                 let cfg = NSWorkspace.OpenConfiguration()
                 cfg.activates = true
+                cfg.createsNewApplicationInstance = who == "ultra"   // the Pro instance is the same Claude.app; without this macOS would only focus it
                 stepBack()
                 NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: app), configuration: cfg) { _, _ in
                     Task { @MainActor in self.stepBack() }
@@ -63,6 +68,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 showMain("qwen")         // Qwen lives inside Bridge
                 did = "Qwen chat in Bridge"
             }
+        } else if u.host == "board", let seg = URLComponents(url: u, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "seg" })?.value {
+            KitJump.board(seg)                   // bridge://board?seg=Done|Moving|Open  → same path as the Command tiles
+            showMain("board"); did = "main window, board, \(seg)"
         } else {
             showMain(u.host)
         }

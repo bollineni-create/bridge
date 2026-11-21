@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-// Qwen has no app of its own, so Bridge is its app: saved chats, streaming answers, and your live context from this Mac on every question.
+// Qwen has no app of its own, so Bridge is its app: saved chats, streaming answers, and his live context from this Mac on every question.
 
 struct ChatMsg: Codable, Identifiable, Equatable {
     var id = UUID()
@@ -165,7 +165,7 @@ struct QwenView: View {
                         .help("Adds matching messages, mail, notes, reminders and calendar from this Mac to each question")
                     Menu {
                         Button("Claude · Ultra") { handOff("ultra") }
-                        Button("Claude 2 · Pro") { handOff("pro") }
+                        Button("Claude Pro") { handOff("pro") }
                     } label: { Label("Hand off", systemImage: "arrowshape.turn.up.right") }
                         .menuStyle(.borderlessButton).fixedSize().disabled(chat.thread?.msgs.isEmpty ?? true)
                 }

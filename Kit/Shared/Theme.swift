@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 import CoreText
 
 /// "Swiss Tombstone", the bollineni.co design system: white paper, black ink, one red accent,
@@ -122,12 +125,41 @@ struct Tombstones: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12).padding(.vertical, 11)
                     .background(s.inverted ? D.ink : D.paper)
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).allowsHitTesting(s.tap != nil)
+                .buttonStyle(StoneStyle(inverted: s.inverted)).allowsHitTesting(s.tap != nil)
+                .pointerOnHover(s.tap != nil)
             }
         }
         .padding(2)
         .background(D.ink)
+    }
+}
+
+/// Pressed tombstone dims; a hovered one gets an inner rule so it reads as clickable.
+private struct StoneStyle: ButtonStyle {
+    var inverted = false
+    func makeBody(configuration: Configuration) -> some View { StoneBody(c: configuration, inverted: inverted) }
+    private struct StoneBody: View {
+        let c: ButtonStyleConfiguration; let inverted: Bool
+        @State private var hover = false
+        var body: some View {
+            c.label
+                .overlay(Rectangle().strokeBorder(inverted ? Color.white : D.red, lineWidth: 2).padding(2).opacity(hover ? 1 : 0))
+                .opacity(c.isPressed ? 0.75 : 1)
+                .onHover { hover = $0 }
+        }
+    }
+}
+
+extension View {
+    /// Pointing-hand cursor on Mac when `on`; no-op elsewhere.
+    @ViewBuilder func pointerOnHover(_ on: Bool = true) -> some View {
+        #if os(macOS)
+        if on { self.onHover { $0 ? NSCursor.pointingHand.push() : NSCursor.pop() } } else { self }
+        #else
+        self
+        #endif
     }
 }
 

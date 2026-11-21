@@ -1,6 +1,36 @@
 import AppKit
 import ApplicationServices
 
+/// Both accounts run from the same signed Claude.app. Ultra uses the default profile; Pro is the instance started on the
+/// Duplex profile folder by /Applications/Claude Pro.app. So a runner is found by its profile argument, never by app path alone.
+enum ClaudeApps {
+    static let claude = "/Applications/Claude.app"
+    static let pro = "/Applications/Claude Pro.app"       // the launcher, and the path Bridge uses to mean "the Pro runner"
+    static let proMark = "Duplex/claude-2/data"
+
+    static func args(_ pid: pid_t) -> String {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return "" }
+        var buf = [UInt8](repeating: 0, count: size)
+        guard sysctl(&mib, 3, &buf, &size, nil, 0) == 0 else { return "" }
+        return String(decoding: buf.prefix(size).map { $0 == 0 ? 32 : $0 }, as: UTF8.self)
+    }
+
+    /// The running app for a runner path. Any other path is matched the ordinary way.
+    static func running(_ path: String) -> NSRunningApplication? {
+        let apps = NSWorkspace.shared.runningApplications
+        guard path == pro || path == claude else { return apps.first { $0.bundleURL?.path == path } }
+        let wantPro = path == pro
+        return apps.first { $0.bundleURL?.path == claude && $0.activationPolicy == .regular && args($0.processIdentifier).contains(proMark) == wantPro }
+    }
+
+    static func isFront(_ path: String) -> Bool {
+        guard let f = NSWorkspace.shared.frontmostApplication, let r = running(path) else { return false }
+        return f.processIdentifier == r.processIdentifier
+    }
+}
+
 /// Reads what a Claude window is really showing through the Accessibility tree: the open chat's title and whether a reply is streaming.
 enum AppProbe {
     static var enabled: Set<pid_t> = []
@@ -16,7 +46,7 @@ enum AppProbe {
     static func kids(_ e: AXUIElement) -> [AXUIElement] { (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] }
 
     static func app(_ path: String) -> NSRunningApplication? {
-        NSWorkspace.shared.runningApplications.first { $0.bundleURL?.path == path }
+        ClaudeApps.running(path)
     }
 
     static func root(_ path: String) -> AXUIElement? {

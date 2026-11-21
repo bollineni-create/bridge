@@ -44,28 +44,38 @@ struct SidebarDS: View {
     }
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 2) {
-                Color.clear.frame(height: 30)          // the traffic lights sit here
-                HStack(spacing: 10) {
-                    HStack(alignment: .center, spacing: 3) {
-                        Capsule().fill(DS.ultra).frame(width: 4, height: 9)
-                        Capsule().fill(DS.pro).frame(width: 4, height: 14)
-                        Capsule().fill(DS.mac).frame(width: 4, height: 20)
-                    }
-                    .frame(height: 20)
-                    (Text("Bridge").foregroundColor(.white) + Text(".").foregroundColor(SW.red)).font(SW.display(24)).tracking(-1.2)
+        VStack(alignment: .leading, spacing: 0) {
+            Color.clear.frame(height: 30)          // the traffic lights sit here, pinned so rows never slide under them
+            HStack(spacing: 10) {
+                HStack(alignment: .center, spacing: 3) {
+                    Capsule().fill(DS.ultra).frame(width: 4, height: 9)
+                    Capsule().fill(DS.pro).frame(width: 4, height: 14)
+                    Capsule().fill(DS.mac).frame(width: 4, height: 20)
                 }
-                .padding(.horizontal, 8).padding(.bottom, 12)
-                row(.command); row(.board); row(.needs); row(.qwen, "Qwen")
-                section("Feeds")
-                row(.calendar); row(.reminders); row(.messages); row(.mail); row(.notes)
-                section("Control")
-                row(.apps); row(.vault); row(.health); row(.settings)
-                section("More")
-                row(.context); row(.shortcuts); row(.activity)
+                .frame(height: 20)
+                (Text("Bridge").foregroundColor(.white) + Text(".").foregroundColor(SW.red)).font(SW.display(24)).tracking(-1.2)
             }
-            .padding(.horizontal, 10).padding(.bottom, 12)
+            .padding(.horizontal, 18).padding(.bottom, 12)
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 2) {
+                    row(.command); row(.board); row(.needs); row(.qwen, "Qwen")
+                    section("Feeds")
+                    row(.calendar); row(.reminders); row(.messages); row(.mail); row(.notes)
+                    section("Control")
+                    row(.apps); row(.vault); row(.health); row(.settings)
+                    section("More")
+                    row(.context); row(.shortcuts); row(.activity)
+                }
+                .padding(.horizontal, 10).padding(.top, 14).padding(.bottom, 22)
+            }
+            .overlay(alignment: .top) {
+                LinearGradient(colors: [Color.black, Color.black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 14).allowsHitTesting(false)
+            }
+            .overlay(alignment: .bottom) {
+                LinearGradient(colors: [Color.black.opacity(0), Color.black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 22).allowsHitTesting(false)
+            }
         }
         .frame(width: 240)
         .frame(maxHeight: .infinity)
