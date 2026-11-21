@@ -100,7 +100,7 @@ public final class Store: ObservableObject {
     // MARK: actions (everything goes through the bridge CLI, acting as the owner)
     func complete(_ n: NeedItem) {
         switch n.kind {
-        case .task: act(["done", n.id, "Done in Bridge"], key: n.id, ok: "\(n.id) done")
+        case .task: act(["done", n.id, "Done by the owner in Bridge"], key: n.id, ok: "\(n.id) done")
         case .need: act(["resolve", n.id, "done"], key: n.id, ok: "Cleared")
         case .approval: act(["approve", n.id], key: n.id, ok: "Approved")
         }

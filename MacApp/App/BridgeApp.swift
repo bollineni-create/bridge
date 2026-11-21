@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let w = mainWindow { if windowWasOpen { w.orderBack(nil) } else { w.close() } }
     }
     func showMain(_ pane: String? = nil) {
-        if let p = pane, !p.isEmpty { WindowOpener.store?.requestedPane = p }
+        if let p = pane, !p.isEmpty { WindowOpener.store?.requestedPane = p == "qwen" ? "chat" : p }   // old bridge://qwen links land in Chat
         if let w = NSApp.windows.first(where: { $0.title == "Bridge" && $0.canBecomeMain && ($0.isVisible || $0.isMiniaturized) }) {
             if w.isMiniaturized { w.deminiaturize(nil) }
             w.makeKeyAndOrderFront(nil)
@@ -65,8 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 did = "opened \(app)"
             } else {
-                showMain("qwen")         // Qwen lives inside Bridge
-                did = "Qwen chat in Bridge"
+                showMain("chat")         // Qwen lives in Bridge Chat (runner: This Mac)
+                did = "Bridge Chat"
             }
         } else if u.host == "board", let seg = URLComponents(url: u, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "seg" })?.value {
             KitJump.board(seg)                   // bridge://board?seg=Done|Moving|Open  → same path as the Command tiles

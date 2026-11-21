@@ -12,7 +12,7 @@ struct BridgeWidgetBundle: WidgetBundle {
 //  - Runner tint only while that runner works or holds; everything else is grey.
 //  - Runners are fixed three-letter codes (ULT, PRO, MAC). Only a task title may truncate; codes, IDs, counts and times never do.
 //  - Layout A (Nov 20): small day count, the task at hand as the hero, three runner tiles in their colours.
-// `Big.k` scales the whole expanded island. The owner asked for it big (Nov 19). macOS fixes the island's WIDTH (about 327 pt on his
+// `Big.k` scales the whole expanded island. the owner asked for it big (Nov 19). macOS fixes the island's WIDTH (about 327 pt on his
 // MacBook Pro; a wider frame is clipped, tested Nov 19) and lets the HEIGHT follow the content, so big means taller and larger type.
 // Nov 21: macOS draws the island as tall as its content (seen at ~190 pt, nothing clipped); Apple's 160 pt cap is the iPhone's.
 // 1.25 = 152 pt with design C (Nov 21). macOS SHRINKS the whole island when content passes ~160 pt (seen on his Mac), so the title is one line and k stays under that.

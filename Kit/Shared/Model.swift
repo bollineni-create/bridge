@@ -19,6 +19,7 @@ struct PConvo: Decodable, Identifiable, Equatable {
 }
 struct PMsg: Decodable, Identifiable, Equatable {
     var id: Int; var ts: Double?; var role: String; var runner: String?; var kind: String?; var text: String?; var task: Int?; var turn: Int?; var state: String?
+    var options: [String]?
 }
 struct PStep: Decodable, Identifiable, Equatable {
     var id: Int; var turn: Int?; var idx: Int; var title: String; var runner: String?; var status: String?; var task: Int?

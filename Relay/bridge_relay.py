@@ -56,6 +56,8 @@ def allowed(args):
         if not rest:
             return False
         sub = rest[0]
+        if sub == "permit":                  # a permission card's button, by its exact title
+            return len(rest) == 3 and re.match(r"^M\d{1,7}$", rest[1]) is not None and 0 < len(rest[2]) <= 40
         if sub in ("stop", "delete"):
             return len(rest) == 2 and CONVO_RE.match(rest[1]) is not None
         if sub == "send":

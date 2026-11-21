@@ -170,7 +170,7 @@ struct TaskSheet: View {
                     }.buttonStyle(SquareButton())
                     if t.forWho != "local" { Button("Assign to Mac") { s.act(["assign", "T\(t.id)", "local"], key: "T\(t.id)", ok: "T\(t.id) → Mac"); dismiss() }.buttonStyle(SquareButton()) }
                     Spacer()
-                    Button("Done") { s.act(["done", "T\(t.id)", "Done in Bridge"], key: "T\(t.id)", ok: "T\(t.id) done"); dismiss() }.buttonStyle(SquareButton(solid: true))
+                    Button("Done") { s.act(["done", "T\(t.id)", "Done by the owner in Bridge"], key: "T\(t.id)", ok: "T\(t.id) done"); dismiss() }.buttonStyle(SquareButton(solid: true))
                 }.padding(.top, 14)
             }
         }

@@ -223,30 +223,54 @@ enum AppProbe {
             let got = focusChat(path, chat)
             if got != chat { return "fail: could not open the chat \u{201C}\(chat)\u{201D} (\(got))" }
         } else if newChat {
-            guard let new = flat(path).first(where: { $0.1 == "AXButton" && $0.2 == "New" }) else { return "fail: no New button" }
+            guard let new = flat(path, limit: 40000).first(where: { $0.1 == "AXButton" && $0.2 == "New" }) else { return "fail: no New button" }
             AXUIElementPerformAction(new.0, kAXPressAction as CFString)
             Thread.sleep(forTimeInterval: 1.5)
         }
         let pre = sendState(path)
         if let l = pre["limit"] as? String, !l.isEmpty { return "limit: \(l)" }
-        if (pre["composer"] as? Int ?? 0) > 0 { return "fail: there is unsent text in the message box" }
+        if (pre["composer"] as? Int ?? 0) > 0 {
+            let boxes = flat(path, limit: 40000).filter { $0.1 == "AXTextArea" }
+            let b = boxes.last(where: { $0.2.hasPrefix("Write your prompt") })?.0 ?? boxes.last?.0
+            let v = b.flatMap { attr($0, kAXValueAttribute) as? String } ?? "x"
+            if let b, v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { AXUIElementSetAttributeValue(b, kAXValueAttribute as CFString, "" as CFString) }
+            else { return "fail: there is unsent text in the message box (\(v.count) characters; left untouched)" }      // his own draft: never overwrite it
+        }
         var picked = ""
         if !model.isEmpty || !effort.isEmpty { picked = setModel(path, model: model, effort: effort) }
-        guard let box = flat(path).last(where: { $0.1 == "AXTextArea" && $0.2.hasPrefix("Write your prompt") })?.0 else { return "fail: no message box" }
-        AXUIElementSetAttributeValue(box, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(box, kAXValueAttribute as CFString, text as CFString)
-        Thread.sleep(forTimeInterval: 0.5)
-        var filled = (attr(box, kAXValueAttribute) as? String ?? "").count
-        if filled < max(1, text.count * 8 / 10) {
-            AXUIElementSetAttributeValue(box, kAXSelectedTextAttribute as CFString, text as CFString)
+        // The composer's label differs by view (a chat says "Write your prompt to Claude", a new code session or project something else),
+        // and a fresh chat can take a moment to draw it: prefer the known label, then any prompt-like box, then the last text area; wait up to 4 s.
+        func findBox() -> AXUIElement? {
+            let f = flat(path, limit: 40000).filter { $0.1 == "AXTextArea" }
+            if let b = f.last(where: { $0.2.hasPrefix("Write your prompt") }) { return b.0 }
+            let hints = ["prompt", "message", "reply", "help", "ask", "task", "describe"]
+            if let b = f.last(where: { t in hints.contains { t.2.lowercased().contains($0) } }) { return b.0 }
+            return f.last?.0
+        }
+        var found = findBox()
+        for _ in 0..<8 where found == nil { Thread.sleep(forTimeInterval: 0.5); found = findBox() }
+        guard var box = found else { return "fail: no message box" }
+        // A fresh session redraws its composer just after it opens, which can wipe text set too early: find the box again and refill, up to 3 times.
+        var filled = 0
+        for attempt in 0..<3 {
+            if attempt > 0 { Thread.sleep(forTimeInterval: 0.8); if let b = findBox() { box = b } }
+            AXUIElementSetAttributeValue(box, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(box, kAXValueAttribute as CFString, text as CFString)
             Thread.sleep(forTimeInterval: 0.5)
             filled = (attr(box, kAXValueAttribute) as? String ?? "").count
+            if filled < max(1, text.count * 8 / 10) {
+                AXUIElementSetAttributeValue(box, kAXSelectedTextAttribute as CFString, text as CFString)
+                Thread.sleep(forTimeInterval: 0.5)
+                filled = (attr(box, kAXValueAttribute) as? String ?? "").count
+            }
+            if filled >= max(1, text.count * 8 / 10) { break }
         }
         if filled < max(1, text.count * 8 / 10) {
             AXUIElementSetAttributeValue(box, kAXValueAttribute as CFString, "" as CFString)
             return "fail: the message box did not take the text (\(filled)/\(text.count))"
         }
-        guard let send = flat(path).last(where: { $0.1 == "AXButton" && $0.2 == "Send message" })?.0 else { return "fail: no Send button" }
+        guard let send = (flat(path, limit: 40000).last(where: { $0.1 == "AXButton" && $0.2 == "Send message" })
+                          ?? flat(path, limit: 40000).last(where: { $0.1 == "AXButton" && ["Send", "Submit", "Send prompt", "Start"].contains($0.2) }))?.0 else { return "fail: no Send button" }
         AXUIElementPerformAction(send, kAXPressAction as CFString)
         Thread.sleep(forTimeInterval: 2.0)
         let post = sendState(path)
@@ -255,13 +279,25 @@ enum AppProbe {
         return "ok: sent\(picked.isEmpty ? "" : " · " + picked)"
     }
 
+    /// Press the permission button the owner picked in Bridge Chat: open its chat if named, then press the last button with exactly that title.
+    static func pressButton(_ path: String, chat: String, title: String) -> String {
+        guard root(path) != nil else { return "fail: no access to the Claude window" }
+        if !chat.isEmpty, (read(path)?["open"] as? String ?? "") != chat {
+            let got = focusChat(path, chat)
+            if got != chat { return "fail: could not open the chat \u{201C}\(chat)\u{201D} (\(got))" }
+        }
+        guard let b = flat(path, limit: 40000).last(where: { $0.1 == "AXButton" && $0.2 == title })?.0 else { return "fail: the \u{201C}\(title)\u{201D} button is no longer on screen" }
+        AXUIElementPerformAction(b, kAXPressAction as CFString)
+        return "ok: pressed \(title)"
+    }
+
     /// Click the sidebar chat with this title, so a message lands in that exact chat. Returns the open chat's title afterwards.
     static func focusChat(_ path: String, _ title: String) -> String {
         guard let r = root(path) else { return "no access" }
         var target: AXUIElement?, count = 0
         let names = [kAXRoleAttribute, kAXTitleAttribute, kAXChildrenAttribute] as CFArray
         func walk(_ e: AXUIElement, _ d: Int) {
-            if target != nil || count > 6000 || d > 70 { return }
+            if target != nil || count > 40000 || d > 90 { return }
             count += 1
             var vals: CFArray?
             guard AXUIElementCopyMultipleAttributeValues(e, names, [], &vals) == .success, let v = vals as? [AnyObject], v.count == 3 else { return }
@@ -330,11 +366,27 @@ enum AppProbe {
         flush()
         var total = 0, keep: [[String: String]] = []
         for t in turns.reversed() { total += (t["text"] ?? "").count; if total > maxChars && !keep.isEmpty { break }; keep.insert(t, at: 0) }
+        // A permission card (Claude asking before it uses a tool): an allow-type and a deny-type button close together,
+        // plus the text just above them. Read in tree order; the last such group on screen wins. Bridge Chat relays it to the owner.
+        var permission: [String: Any]? = nil
+        func isAllow(_ t: String) -> Bool { let l = t.lowercased(); return ["allow", "allow once", "always allow", "allow always", "allow for this chat", "approve", "accept", "run", "yes, allow", "continue"].contains(l) || l.hasPrefix("always allow") || l.hasPrefix("allow for") || l.hasPrefix("allow once") }
+        func isDeny(_ t: String) -> Bool { let l = t.lowercased().replacingOccurrences(of: "\u{2019}", with: "'"); return ["deny", "don't allow", "reject", "decline", "no", "cancel", "don't run"].contains(l) || l.hasPrefix("deny") || l.hasPrefix("don't allow") }
+        for (i, it) in items.enumerated().reversed() where it.0 == "b" && (isAllow(it.1) || isDeny(it.1)) {
+            let lo = max(0, i - 6), hi = min(items.count - 1, i + 6)
+            let near = items[lo...hi].filter { $0.0 == "b" && (isAllow($0.1) || isDeny($0.1)) }.map { $0.1 }
+            guard near.contains(where: isAllow), near.contains(where: isDeny) else { continue }
+            var opts: [String] = []
+            for o in near where !opts.contains(o) { opts.append(o) }
+            let first = items[lo...hi].firstIndex { $0.0 == "b" && (isAllow($0.1) || isDeny($0.1)) } ?? i
+            let text = items[max(0, first - 10)..<first].filter { $0.0 == "t" || $0.0 == "h" }.map { $0.1 }.joined(separator: " ")
+            permission = ["prompt": String(text.suffix(600)), "options": opts]
+            break
+        }
         if !generating { step = "" }
         if step.hasSuffix(" running") { step = String(step.dropLast(8)) }
         if let c = step.range(of: ": "), step.count > 80 { step = String(step[..<c.lowerBound]) }
         return ["window": count > 40, "open": open, "running": running, "generating": generating, "step": String(step.prefix(90)),
-                "model": model, "recents": Array(recents.prefix(15)), "turns": keep, "turn_count": turns.count]
+                "model": model, "recents": Array(recents.prefix(15)), "turns": keep, "turn_count": turns.count, "permission": permission ?? NSNull()]
     }
 
     /// chatRead, with one more try when the tree came back empty: the first read after a Claude window starts (or after Bridge

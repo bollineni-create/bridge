@@ -69,7 +69,7 @@ struct PhoneBoard: View {
         .refreshable { await link.pull() }
     }
 
-    func done(_ t: BTask) { s.act(["done", "T\(t.id)", "Done in Bridge"], key: "T\(t.id)", ok: "T\(t.id) done") }
+    func done(_ t: BTask) { s.act(["done", "T\(t.id)", "Done by the owner in Bridge"], key: "T\(t.id)", ok: "T\(t.id) done") }
     func toMac(_ t: BTask) { s.act(["assign", "T\(t.id)", "local"], key: "T\(t.id)", ok: "T\(t.id) → Mac") }
 }
 
@@ -160,7 +160,7 @@ struct TaskDetail: View {
             if !t.isDone {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Mark Done", systemImage: "checkmark") {
-                        s.act(["done", "T\(t.id)", "Done in Bridge"], key: "T\(t.id)", ok: "T\(t.id) done")
+                        s.act(["done", "T\(t.id)", "Done by the owner in Bridge"], key: "T\(t.id)", ok: "T\(t.id) done")
                         dismiss()
                     }
                 }

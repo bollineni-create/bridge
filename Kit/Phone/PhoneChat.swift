@@ -251,6 +251,7 @@ struct PhoneConvo: View {
 }
 
 struct PMsgView: View {
+    @EnvironmentObject var s: Store
     var m: PMsg
     var steps: [PStep]
     @State private var expanded = false
@@ -273,6 +274,8 @@ struct PMsgView: View {
             }
         case "bridge" where m.kind == "status":
             Text(m.text ?? "").font(.caption).foregroundStyle(.secondary)
+        case "runner" where m.kind == "permission":
+            permissionCard
         default:
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
@@ -295,6 +298,47 @@ struct PMsgView: View {
                 if m.kind == "question" { RoundedRectangle(cornerRadius: 2).fill(P.accent).frame(width: 3).padding(.vertical, 10) }
             }
             .contextMenu { Button { UIPasteboard.general.string = m.text } label: { Label("Copy", systemImage: "doc.on.doc") } }
+        }
+    }
+
+    @State private var chosen: String?
+    var answered: String? {
+        let st = m.state ?? ""
+        return st.hasPrefix("answered: ") ? "You chose \u{201C}\(st.dropFirst(10))\u{201D}" : (st == "closed" ? "Answered in Claude" : chosen.map { "You chose \u{201C}\($0)\u{201D}" })
+    }
+    func allows(_ o: String) -> Bool { let l = o.lowercased(); return l.hasPrefix("allow") || l.hasPrefix("always") || ["approve", "accept", "run", "continue", "yes, allow"].contains(l) }
+
+    var permissionCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                RunnerAvatar(who: m.runner, on: true, size: 22)
+                Text("\(D.name(m.runner)) needs your permission").font(.footnote.weight(.semibold))
+                Spacer()
+            }
+            Text(m.text ?? "").font(.callout)
+            if let a = answered {
+                Label(a, systemImage: "checkmark.circle.fill").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+            } else {
+                ViewThatFits {
+                    HStack(spacing: 8) { buttons }
+                    VStack(alignment: .leading, spacing: 8) { buttons }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(P.accent.opacity(0.6), lineWidth: 1))
+    }
+
+    @ViewBuilder var buttons: some View {
+        ForEach(m.options ?? [], id: \.self) { o in
+            Button(o) {
+                chosen = o
+                s.backend.run(["convo", "permit", "M\(m.id)", o]) { ok, out in
+                    if !ok || out.contains("ERROR") { chosen = nil; s.say(out.components(separatedBy: "\n").last ?? "Didn't go through", long: true) }
+                }
+            }
+            .buttonStyle(.glassProminent).tint(allows(o) ? .green : .gray)
         }
     }
 

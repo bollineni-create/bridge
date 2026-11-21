@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 enum Pane: String, CaseIterable, Identifiable, Hashable {
-    case chat, command, board, needs, calendar, reminders, messages, mail, notes, contacts, browser, music, location, apps, system, shortcuts, vault, activity, health, settings, context, qwen
+    case chat, command, board, needs, calendar, reminders, messages, mail, notes, contacts, browser, music, location, apps, system, shortcuts, vault, activity, health, settings, context
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -37,7 +37,6 @@ enum Pane: String, CaseIterable, Identifiable, Hashable {
         case .health: return "stethoscope"
         case .settings: return "gearshape"
         case .context: return "square.stack.3d.up.fill"
-        case .qwen: return "bubble.left.and.bubble.right.fill"
         }
     }
 }
@@ -106,7 +105,7 @@ struct Sidebar: View {
                 }
                 .padding(.vertical, 6)
             }
-            Section("Bridge") { rows([.command, .qwen, .board, .needs]) }
+            Section("Bridge") { rows([.chat, .command, .board, .needs]) }
             Section("What Claude can use") { rows([.context, .apps, .shortcuts, .vault]) }
             Section("Engine") { rows([.activity, .health, .settings]) }
         }
@@ -139,7 +138,6 @@ struct DetailView: View {
             case .health: HealthView()
             case .settings: SettingsView()
             case .context: ContextView()
-            case .qwen: QwenView(chat: store.qwen)
             default: FeedView(source: pane.rawValue, title: pane.title)
             }
             }
@@ -268,8 +266,8 @@ struct TaskRow: View {
                                 Button("Me") { store.cli(["assign", "T\(t.id)", "naren"], quiet: true) }
                                 Button("Park it") { store.cli(["assign", "T\(t.id)", "parked"], quiet: true) }
                             }.menuStyle(.borderlessButton).fixedSize()
-                            if t.live { Button("Release claim") { store.cli(["release", "T\(t.id)", "released in Bridge"], quiet: true) }.buttonStyle(QuietButton()) }
-                            Button("Mark done") { store.cli(["done", "T\(t.id)", "marked done in Bridge"], quiet: true) }.buttonStyle(QuietButton(color: Ink.good))
+                            if t.live { Button("Release claim") { store.cli(["release", "T\(t.id)", "released by the owner in the app"], quiet: true) }.buttonStyle(QuietButton()) }
+                            Button("Mark done") { store.cli(["done", "T\(t.id)", "marked done by the owner"], quiet: true) }.buttonStyle(QuietButton(color: Ink.good))
                             if let u = t.url, let url = URL(string: u) { Button("Open chat") { NSWorkspace.shared.open(url) }.buttonStyle(QuietButton()) }
                         }
                     }

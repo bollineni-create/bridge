@@ -234,7 +234,6 @@ extension Pane {
         case .health: return .pink
         case .settings: return .gray
         case .context: return .blue
-        case .qwen: return .teal
         }
     }
 }

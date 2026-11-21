@@ -40,7 +40,6 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
     let locator = Locator()
     let vault = Vault()
     let perms = Permissions()
-    let qwen = QwenChat()
 
     private var mtime: Date?
     private var ticks = 0
@@ -119,6 +118,16 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
             }
         }
         selfCheck()
+        // Bridge Chat: the owner picked a permission button → press it in that runner's Claude window. Own file, so it never collides with ax-post.
+        if let d = FileManager.default.contents(atPath: "/tmp/bridge-ax-press.json"), let j = try? JSONSerialization.jsonObject(with: d) as? [String: String] {
+            try? FileManager.default.removeItem(atPath: "/tmp/bridge-ax-press.json")
+            let path = j["who"] == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
+            DispatchQueue.global().async {
+                let res = AppProbe.pressButton(path, chat: j["chat"] ?? "", title: j["option"] ?? "")
+                try? res.write(toFile: "/tmp/bridge-ax-press-\(j["id"] ?? "x").result", atomically: true, encoding: .utf8)
+                Task { @MainActor in self.probeNow = true }
+            }
+        }
         if FileManager.default.fileExists(atPath: "/tmp/bridge-probe-now") { try? FileManager.default.removeItem(atPath: "/tmp/bridge-probe-now"); probeNow = true }   // Bridge Chat waits on a Claude reply
         if ticks % 60 == 0 && !sweeping && snap?.settings["read_windows"] != "0" && AppProbe.idleSeconds() > 240 { sweepChats() }
         // Reading another app's window makes macOS show its own "Bridge is accessing…" pill, which squeezes the Live Activity.
@@ -228,9 +237,9 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
             DispatchQueue.global().async { try? AppProbe.dump(path).write(toFile: "/tmp/bridge-ax-\(who).txt", atomically: true, encoding: .utf8) }
             return
         }
-        if name.hasPrefix("qwen:") {         // test hook: ask Qwen in the chat pane
-            requestedPane = "qwen"
-            qwen.send(String(name.dropFirst(5)), model: snap?.settings["model"] ?? "qwen3.8:27b-mlx")
+        if name.hasPrefix("qwen:") {         // test hook: ask Qwen (local) in Bridge Chat
+            requestedPane = "chat"
+            cli(["convo", "send", "new", String(name.dropFirst(5)), "--who", "local"], quiet: true)
             return
         }
         if name.hasPrefix("appearance:") {   // test hook: force light or dark for this app only

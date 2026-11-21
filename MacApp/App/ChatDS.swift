@@ -27,6 +27,7 @@ struct ConvoMsg: Decodable, Identifiable, Equatable {
     var task: Int?
     var turn: Int?
     var state: String
+    var options: [String]? = nil     // kind "permission": the card's buttons, in Claude's order
 }
 
 struct ConvoStep: Decodable, Identifiable, Equatable {
@@ -183,6 +184,14 @@ struct ChatDSView: View {
                 Text(headerSub).font(SW.a(12.5, 400)).foregroundStyle(DS.label2).lineLimit(1)
             }
             Spacer()
+            if let c = current, c.status != "working", !c.msgs.isEmpty {
+                Menu {
+                    ForEach((options?.runners ?? []).filter { $0.id != c.runner }) { r in
+                        Button(r.name) { store.cli(["convo", "send", "C\(c.id)", "Continue this conversation and finish it.", "--who", r.id], quiet: true) }
+                    }
+                } label: { Label("Hand off", systemImage: "arrowshape.turn.up.right") }
+                    .menuStyle(.borderlessButton).fixedSize().help("Give this whole conversation to another runner")
+            }
             if current?.status == "working" {
                 Button { if let c = current { store.cli(["convo", "stop", "C\(c.id)"], quiet: true) } } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(QuietButton(color: SW.red))
@@ -192,7 +201,7 @@ struct ChatDSView: View {
     }
 
     var headerSub: String {
-        guard let c = current else { return "Bridge routes it to Ultra, Pro or Qwen, or splits it across them, and reports back here." }
+        guard let c = current else { return "Bridge routes it to Ultra, Pro or Qwen on this Mac, or splits it across them, and reports back here." }
         var bits: [String] = []
         if !c.runner.isEmpty { bits.append("with \(DS.name(c.runner))") }
         if !c.chat.isEmpty { bits.append("Claude chat “\(c.chat)”") }
@@ -305,8 +314,8 @@ struct ChatDSView: View {
 
     func followHint(_ c: Convo) -> String {
         let r = DS.name(c.runner)
-        return c.chat.isEmpty ? "Replies go to \(r), keeping this conversation's context. Pick another runner to switch."
-                              : "Replies continue in \(r)'s chat “\(c.chat)”. Pick another runner to switch."
+        return c.chat.isEmpty ? "Replies go to \(r), keeping this conversation's context. Pick another runner (or Hand off) to switch; the conversation goes with it."
+                              : "Replies continue in \(r)'s chat “\(c.chat)”. Pick another runner (or Hand off) to switch; the conversation goes with it."
     }
 
     func picker<Content: View>(label: String, icon: String, @ViewBuilder _ items: () -> Content) -> some View {
@@ -320,6 +329,7 @@ struct ChatDSView: View {
 
 // MARK: one message
 struct MsgView: View {
+    @EnvironmentObject var store: Store
     var m: ConvoMsg
     var steps: [ConvoStep]
     @State private var expanded = false
@@ -334,6 +344,8 @@ struct MsgView: View {
             }
         case "bridge" where m.kind == "plan":
             PlanView(text: m.text, steps: steps)
+        case "runner" where m.kind == "permission":
+            PermissionCard(m: m)
         case "bridge" where m.kind == "status":
             Text(m.text).font(SW.a(12, 400)).foregroundStyle(DS.label3)
         default:
@@ -431,5 +443,43 @@ struct RunnerStrip: View {
             }
         }
         .padding(.vertical, 6)
+    }
+}
+
+/// Claude asking before it uses a tool, relayed with Claude's own wording and buttons. Tapping one presses that button in the
+/// runner's Claude window; nothing is approved without a tap here (or in Claude itself).
+struct PermissionCard: View {
+    @EnvironmentObject var store: Store
+    var m: ConvoMsg
+    @State private var sent: String?
+    var answered: String? { m.state.hasPrefix("answered: ") ? String(m.state.dropFirst(10)) : (m.state == "closed" ? "answered in Claude" : sent) }
+    static func allows(_ o: String) -> Bool { let l = o.lowercased(); return l.hasPrefix("allow") || l.hasPrefix("always") || ["approve", "accept", "run", "continue", "yes, allow"].contains(l) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Text(DS.code(m.runner)).font(SW.a(10.5, 800)).tracking(0.6).foregroundStyle(DS.onRunner).padding(.horizontal, 6).padding(.vertical, 2).background(DS.runner(m.runner))
+                Text("\(DS.name(m.runner)) needs your permission").font(SW.a(12.5, 700))
+                Spacer()
+                if let t = m.task { Text("T\(t)").font(SW.a(11, 500)).foregroundStyle(DS.label3) }
+            }
+            Text(m.text).font(SW.a(14, 400)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            if let a = answered {
+                Label(a.hasPrefix("answered") ? a.capitalized : "You chose \u{201C}\(a)\u{201D}", systemImage: "checkmark.circle").font(SW.a(12.5, 600)).foregroundStyle(DS.label2)
+            } else {
+                HStack(spacing: 8) {
+                    ForEach(m.options ?? [], id: \.self) { o in
+                        Button(o) {
+                            sent = o
+                            store.cli(["convo", "permit", "M\(m.id)", o], quiet: true) { ok, out in if !ok { sent = nil; store.say(out) } }
+                        }
+                        .buttonStyle(QuietButton(color: Self.allows(o) ? DS.positive : DS.label2))
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(DS.raised)
+        .overlay(alignment: .leading) { Rectangle().fill(SW.red).frame(width: 3) }
     }
 }

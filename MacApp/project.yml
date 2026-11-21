@@ -6,7 +6,7 @@ targets:
     type: application
     platform: macOS
     sources: [App, Shared]
-    dependencies: [{ target: BridgeWidget }, { target: BridgeKit }]
+    dependencies: [{ target: BridgeWidget }, { target: BridgeKit, embed: true, codeSign: true }]
     info:
       path: App/Info.plist
       properties:
