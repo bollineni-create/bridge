@@ -19,5 +19,9 @@ struct BridgeAttributes: ActivityAttributes {
         var ultraSince: Date? = nil   // when each runner started working; the island counts up from it
         var proSince: Date? = nil
         var localSince: Date? = nil
+        // Current-task progress (Nov 21): what the island's fill tracks, and the flash when it finishes.
+        var focus: String = ""        // "T110", or the runner code when it works in a chat with no board task
+        var focusPct: Double = -1     // 0...1; -1 = nothing running
+        var justDone: String = ""     // "T110 done" for ~12 s after it finishes
     }
 }

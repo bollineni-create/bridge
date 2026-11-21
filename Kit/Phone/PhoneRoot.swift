@@ -32,11 +32,15 @@ struct PhoneRoot: View {
         .onAppear {
             ask.store = s
             if let t = ProcessInfo.processInfo.environment["BRIDGE_TAB"], let tab = Store.Tab(rawValue: t) { s.tab = tab }
+            else { s.tab = .ask }          // Chat is the main screen (Nov 21, 2026)
         }
     }
 
     var tabs: some View {
         TabView(selection: $s.tab) {
+            Tab("Chat", systemImage: "bubble.left.and.text.bubble.right", value: Store.Tab.ask) {
+                PhoneChatList()
+            }
             Tab("Now", systemImage: "waveform", value: Store.Tab.now) {
                 NavigationStack { PhoneNow() }
             }
@@ -46,9 +50,6 @@ struct PhoneRoot: View {
             .badge(s.needCount)
             Tab("Board", systemImage: "checklist", value: Store.Tab.board) {
                 NavigationStack { PhoneBoard() }
-            }
-            Tab("Ask", systemImage: "text.bubble", value: Store.Tab.ask) {
-                NavigationStack { PhoneAsk() }
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
@@ -60,15 +61,15 @@ struct PhoneRoot: View {
                 .navigationSplitViewColumnWidth(min: 320, ideal: 370, max: 440)
         } detail: {
             TabView(selection: rightTab) {
+                Tab("Chat", systemImage: "bubble.left.and.text.bubble.right", value: Store.Tab.ask) {
+                    PhoneChatList()
+                }
                 Tab("Needs You", systemImage: "hand.raised", value: Store.Tab.needs) {
                     NavigationStack { PhoneNeeds() }
                 }
                 .badge(s.needCount)
                 Tab("Board", systemImage: "checklist", value: Store.Tab.board) {
                     NavigationStack { PhoneBoard() }
-                }
-                Tab("Ask", systemImage: "text.bubble", value: Store.Tab.ask) {
-                    NavigationStack { PhoneAsk() }
                 }
             }
         }
@@ -77,7 +78,7 @@ struct PhoneRoot: View {
 
     /// Unfolded, Now is always on screen, so the right side shows the last non-Now tab.
     var rightTab: Binding<Store.Tab> {
-        Binding(get: { s.tab == .now ? .needs : s.tab }, set: { s.tab = $0 })
+        Binding(get: { s.tab == .now ? .ask : s.tab }, set: { s.tab = $0 })
     }
 
     @ViewBuilder var toast: some View {

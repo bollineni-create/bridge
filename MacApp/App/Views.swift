@@ -2,10 +2,11 @@ import SwiftUI
 import AppKit
 
 enum Pane: String, CaseIterable, Identifiable, Hashable {
-    case command, board, needs, calendar, reminders, messages, mail, notes, contacts, browser, music, location, apps, system, shortcuts, vault, activity, health, settings, context, qwen
+    case chat, command, board, needs, calendar, reminders, messages, mail, notes, contacts, browser, music, location, apps, system, shortcuts, vault, activity, health, settings, context, qwen
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .chat: return "Chat"
         case .command: return "Command"
         case .board: return "Board"
         case .needs: return "Needs You"
@@ -15,6 +16,7 @@ enum Pane: String, CaseIterable, Identifiable, Hashable {
     }
     var icon: String {
         switch self {
+        case .chat: return "bubble.left.and.text.bubble.right"
         case .command: return "sparkles"
         case .board: return "rectangle.3.group"
         case .needs: return "hand.raised"
@@ -42,7 +44,7 @@ enum Pane: String, CaseIterable, Identifiable, Hashable {
 
 struct RootView: View {
     @EnvironmentObject var store: Store
-    @State private var pane: Pane = .command
+    @State private var pane: Pane = .chat      // Chat is the main way to drive the runners (Nov 21, 2026)
     var body: some View {
         // Design-system shell (ShellDS.swift): floating sidebar panel + detail on warm paper, filling the window at any size.
         HStack(spacing: 0) {
@@ -126,6 +128,7 @@ struct DetailView: View {
             VStack(spacing: 0) {
             StatusStrip()
             switch pane {
+            case .chat: ChatDSView()
             case .command: KitPane(which: "command", open: { go($0 == "needs" ? .needs : .board) })   // BridgeKit (KitPanes.swift); CommandDSView stays for reference   // design-system Command pane (CommandDS.swift); the old CommandView stays for reference
             case .board: KitPane(which: "board")
             case .needs: KitPane(which: "needs")

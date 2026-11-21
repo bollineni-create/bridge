@@ -17,6 +17,8 @@ struct Snapshot: Decodable {
     var apps: [AppInfo]?
     var vault: VaultIndex?
     var alarms: [Alarm]?
+    var convos: [Convo]?               // Bridge Chat (ChatDS.swift)
+    var convo_options: ConvoOptions?
 }
 
 struct Runner: Decodable, Identifiable {

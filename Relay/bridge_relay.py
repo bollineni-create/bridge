@@ -31,6 +31,9 @@ TS = next((p for p in ("/Applications/Tailscale.app/Contents/MacOS/Tailscale", "
            if os.access(p, os.X_OK)), None)
 
 ID_RE = re.compile(r"^[TNA]\d{1,6}$")
+CONVO_RE = re.compile(r"^C\d{1,6}$")
+MODELS = {"Haiku 5.5", "Sonnet 5.5", "Opus 5.5", "Fable 5.2"}
+EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 WHO = {"auto", "local", "pro", "ultra"}
 
 
@@ -49,6 +52,28 @@ def allowed(args):
         return len(rest) == 1 and rest[0].startswith("A") and ID_RE.match(rest[0]) is not None
     if cmd == "assign":
         return len(rest) == 2 and rest[0].startswith("T") and ID_RE.match(rest[0]) is not None and rest[1] in (WHO - {"auto"}) | {"any"}
+    if cmd == "convo":                       # Bridge Chat: send / stop / delete
+        if not rest:
+            return False
+        sub = rest[0]
+        if sub in ("stop", "delete"):
+            return len(rest) == 2 and CONVO_RE.match(rest[1]) is not None
+        if sub == "send":
+            if len(rest) < 3 or not (rest[1] == "new" or CONVO_RE.match(rest[1])) or not rest[2].strip() or rest[2].startswith("-"):
+                return False
+            flags = rest[3:]
+            if len(flags) % 2:
+                return False
+            for k, v in zip(flags[::2], flags[1::2]):
+                if k == "--who" and (v in WHO or v == "split" or re.match(r"^[a-z][a-z0-9-]{1,23}$", v)):
+                    continue
+                if k == "--model" and v in MODELS:
+                    continue
+                if k == "--effort" and v in EFFORTS:
+                    continue
+                return False
+            return True
+        return False
     if cmd in ("ask", "route", "clarify"):
         if not rest or rest[0].startswith("-"):
             return False
@@ -94,6 +119,10 @@ def slim(snap):
         "counts": snap.get("counts", {}),
         "attention": snap.get("attention", []),
         "actions": [{k: a.get(k) for k in ("id", "kind", "summary", "status")} for a in snap.get("actions", []) if a.get("status") == "approval"],
+        # Bridge Chat: the 20 most recent chats, last 40 messages each (long answers cut to 6000 characters)
+        "convos": [dict(cv, msgs=[dict(m, text=(m.get("text") or "")[:6000]) for m in (cv.get("msgs") or [])[-40:]], steps=(cv.get("steps") or [])[-20:])
+                   for cv in (snap.get("convos") or [])[:20]],
+        "convo_options": snap.get("convo_options"),
     }
 
 
@@ -172,6 +201,12 @@ class PhoneHandler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, *a):
         pass
+
+    def handle(self):
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError):
+            pass                        # the phone hung up mid-answer (e.g. while the engine restarts): not an error
 
     def _send(self, code, obj):
         b = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode()

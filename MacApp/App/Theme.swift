@@ -213,6 +213,7 @@ struct SidebarIcon: View {
 extension Pane {
     var tint: Color {
         switch self {
+        case .chat: return .blue
         case .command: return .blue
         case .board: return .indigo
         case .needs: return .orange
@@ -238,7 +239,7 @@ extension Pane {
     }
 }
 
-// MARK: Civic layer (design system, Nov 19, 2026)
+// MARK: Civic layer (design system)
 // Borrowed from the National Design Studio sites: mono eyebrows (OPM, Genesis Mission), the live strip (gov banner + Genesis clock),
 // huge tight numerals (Tech Force, SI.gov) and one ease for motion (SI.gov).
 enum Civic {

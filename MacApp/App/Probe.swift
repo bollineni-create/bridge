@@ -321,7 +321,7 @@ enum AppProbe {
         var cur: [String: String]? = nil
         func flush() { if let c = cur, !(c["text"] ?? "").isEmpty { turns.append(c) }; cur = nil }
         for (k, t) in items {
-            if k == "h" && t.hasPrefix("You said:") { flush(); cur = ["role": "You", "text": ""] }
+            if k == "h" && t.hasPrefix("You said:") { flush(); cur = ["role": "the owner", "text": ""] }
             else if k == "h" && t.hasPrefix("Claude responded:") { flush(); cur = ["role": "Claude", "text": ""] }
             else if k == "h", cur != nil, !t.isEmpty, !t.hasPrefix("More options") { cur!["text"]! += "\n## " + t + "\n" }
             else if k == "t", cur != nil { cur!["text"]! += (cur!["text"]!.isEmpty || cur!["text"]!.hasSuffix("\n") ? "" : " ") + t }

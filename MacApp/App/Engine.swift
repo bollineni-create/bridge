@@ -103,6 +103,9 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
     func tick() {
         ticks += 1
         if NSApp.isActive || ticks % 3 == 0 || ticks < 5 { load() }      // the snapshot is ~0.7 MB; in the background read it every 3 s, not every second
+        // Nov 21: the progress ring moves with time, not only when the board changes. Every 2 s re-run the island update;
+        // it only pushes to the Live Activity when the ring has moved a step (1%), so a still island costs nothing.
+        if ticks % 2 == 0, activity != nil { updateActivity() }
         if let g = snap?.generated { engineLive = Date().timeIntervalSince1970 - g < 12 } else { engineLive = false }
         if !engineLive && Date().timeIntervalSince(lastKick) > 45 {
             lastKick = Date()
@@ -114,6 +117,7 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
             }
         }
         selfCheck()
+        if FileManager.default.fileExists(atPath: "/tmp/bridge-probe-now") { try? FileManager.default.removeItem(atPath: "/tmp/bridge-probe-now"); probeNow = true }   // Bridge Chat waits on a Claude reply
         if ticks % 60 == 0 && !sweeping && snap?.settings["read_windows"] != "0" && AppProbe.idleSeconds() > 240 { sweepChats() }
         // Reading another app's window makes macOS show its own "Bridge is accessing…" pill, which squeezes the Live Activity.
         // So: read every 4 s only while Bridge itself is in front; otherwise read when a Claude app starts or stops working
@@ -481,9 +485,7 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
         let open = s.tasks.filter { !$0.isDone && !$0.live && ["any", "ultra", "pro", "local"].contains($0.forWho) }
         let working = live.map { "\(($0.holder ?? "").capitalized) · T\($0.id) \($0.title)" }
         let waiting = open.prefix(4).map { "T\($0.id) \($0.title)" + ($0.due != nil ? " · \(dueText($0.due))" : "") }
-        let key = [state(of: "ultra"), state(of: "pro"), state(of: "local"), "\(open.count)", "\(s.counts.needs)", "\(s.counts.naren)", "\(s.counts.doneToday)"].joined(separator: "|") + working.joined() + waiting.joined() + s.runners.compactMap { $0.probe?.running?.first }.joined()
         NotchPanel.shared.enabled = s.settings["big_island"] == "1"
-        if key == lastKey && activity != nil && !force { return }
         func on(_ id: String) -> String {
             if let p = s.runners.first(where: { $0.id == id })?.probe, let t = p.running?.first { return t }
             return live.first(where: { $0.holder == id }).map { "T\($0.id) \($0.title)" } ?? ""
@@ -495,17 +497,37 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
         st.ultraOn = on("ultra"); st.proOn = on("pro"); st.localOn = on("local")
         func since(_ id: String) -> Date? { s.runners.first(where: { $0.id == id })?.since.map { Date(timeIntervalSince1970: $0) } }
         st.ultraSince = since("ultra"); st.proSince = since("pro"); st.localSince = since("local")
+        let f = trackFocus(s, live, st)
+        st.focus = f.focus; st.focusPct = f.pct
+        st.justDone = Date() < justDoneUntil ? justDone : ""
+        let key = [state(of: "ultra"), state(of: "pro"), state(of: "local"), "\(open.count)", "\(s.counts.needs)", "\(s.counts.naren)", "\(s.counts.doneToday)",
+                   st.focus, "\(Int((max(st.focusPct, -0.01)) * 100))", st.justDone].joined(separator: "|") + working.joined() + waiting.joined() + s.runners.compactMap { $0.probe?.running?.first }.joined()
+        if key == lastKey && activity != nil && !force && pendingAlert == nil { return }
         NotchPanel.shared.feed(st, enabled: s.settings["big_island"] == "1")      // the big island panel draws the same state
-        let content = ActivityContent(state: st, staleDate: Date().addingTimeInterval(900), relevanceScore: 100)   // Nov 21: win the notch over other (mirrored iPhone) Live Activities
+        let content = ActivityContent(state: st, staleDate: Date().addingTimeInterval(900), relevanceScore: 100)   // Nov 21 04:28: the owner wants Bridge in the island; other Live Activities (Shortcuts etc.) drop to menu bar ovals
+        // Nov 21: macOS can dismiss or end the activity behind our back (relaunch, reinstall, the agent indicator). A dead
+        // reference meant Bridge kept "updating" an island nobody could see. Drop it and ask for a new one.
+        if let a = activity, a.activityState != .active {
+            Self.alog("activity was \(a.activityState); requesting a new one")
+            activity = nil; activityOn = false; lastKey = ""
+        }
         if let a = activity {
             lastKey = key
-            Task { await a.update(content) }
+            if let alert = pendingAlert {
+                pendingAlert = nil
+                // The island expands with the alert and plays a sound: this is the "it's done" notification.
+                let cfg = AlertConfiguration(title: LocalizedStringResource(stringLiteral: alert.title),
+                                             body: LocalizedStringResource(stringLiteral: alert.body), sound: .default)
+                Task { await a.update(content, alertConfiguration: cfg) }
+            } else {
+                Task { await a.update(content) }
+            }
             return
         }
         // Nov 19, 2026: the Live Activity must come back by itself when Bridge starts in the background (relaunch, reinstall,
         // self-repair), not only when the owner brings the window forward. Retry at most every 20 s if macOS refuses.
         // Nov 20, 2026: never more than one Live Activity. Adopt an existing one and end extras instead of requesting another.
-        let current = Activity<BridgeAttributes>.activities
+        let current = Activity<BridgeAttributes>.activities.filter { $0.activityState == .active }
         if let first = current.first {
             for extra in current.dropFirst() { Task { await extra.end(nil, dismissalPolicy: .immediate) } }
             activity = first; lastKey = key; activityOn = true
@@ -520,10 +542,139 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
             activityOn = true
         } catch {
             activityOn = false
+            if "\(error)".contains("visibility") { bounceForActivity() }
             let why = "\(Date())  Activity.request failed: \(error)  enabled=\(ActivityAuthorizationInfo().areActivitiesEnabled)\n"
             if let h = FileHandle(forWritingAtPath: "/tmp/bridge-activity.log") { h.seekToEndOfFile(); h.write(why.data(using: .utf8)!); h.closeFile() }
             else { try? why.write(toFile: "/tmp/bridge-activity.log", atomically: true, encoding: .utf8) }
         }
+    }
+
+    // MARK: Live Activity revival (Nov 21, 2026)
+    // macOS only lets an app start a Live Activity while it is frontmost ("visibility"). After a relaunch in the background
+    // (watchdog, rebuild, crash) the island stayed gone until the owner clicked Bridge. Now Bridge steps in front for a moment,
+    // starts the activity, and hands focus straight back to the app he was in. At most once every 2 minutes.
+    private var lastBounce = Date.distantPast
+    static func alog(_ s: String) {
+        let line = "\(Date())  \(s)\n"
+        if let h = FileHandle(forWritingAtPath: "/tmp/bridge-activity.log") { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile() }
+        else { try? line.write(toFile: "/tmp/bridge-activity.log", atomically: true, encoding: .utf8) }
+    }
+    private func bounceForActivity() {
+        guard !NSApp.isActive, Date().timeIntervalSince(lastBounce) > 120 else { return }
+        lastBounce = Date()
+        let prev = NSWorkspace.shared.frontmostApplication
+        Self.alog("visibility refused: stepping in front to start the island (back to \(prev?.localizedName ?? "?"))")
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            self.lastRequest = .distantPast
+            self.updateActivity(force: true)
+            Self.alog("after bounce: activity=\(self.activity != nil)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { prev?.activate() }
+        }
+    }
+
+    // MARK: Current-task progress + "done" alert (Nov 21, 2026)
+    // The island's fill follows the task in front of you, not the day. A runner can report a real figure in its heartbeat
+    // ("bridge hb T5 '60% tests pass'"); otherwise the fill runs on elapsed time against that runner's usual task length
+    // (median of its last 20, learned here), eases toward 95% and never claims done. When the task finishes, the Live
+    // Activity alerts (island expands, sound) and the slot flashes full with a tick for 12 s.
+    private var liveSeen: [Int: (start: Date, holder: String, title: String)] = [:]
+    private var chatSince: [String: Date] = [:]
+    private var chatStop: [String: Date] = [:]
+    private var chatTitle: [String: String] = [:]
+    private var justDone = ""
+    private var justDoneUntil = Date.distantPast
+    private var pendingAlert: (title: String, body: String)?
+
+    private func expected(_ key: String, _ fallback: Double) -> Double {
+        let d = (UserDefaults.standard.array(forKey: "taskDur." + key) as? [Double]) ?? []
+        guard d.count >= 3 else { return fallback }
+        let s = d.sorted(); return max(45, s[s.count / 2])
+    }
+    private func record(_ key: String, _ secs: Double) {
+        guard secs > 60, secs < 6 * 3600 else { return }   // under a minute: tests and instant answers, not a task length
+        var d = (UserDefaults.standard.array(forKey: "taskDur." + key) as? [Double]) ?? []
+        d.append(secs); if d.count > 20 { d.removeFirst(d.count - 20) }
+        UserDefaults.standard.set(d, forKey: "taskDur." + key)
+    }
+    static func estimate(elapsed e: Double, expected x: Double) -> Double {
+        let knee = 0.8 * x
+        if e < knee { return max(0.03, e / x) }
+        return 0.8 + 0.15 * (1 - exp(-(e - knee) / (0.5 * x)))
+    }
+    static func reported(_ text: String?) -> Double? {
+        guard let t = text, let r = t.range(of: #"\b(\d{1,3})\s?%"#, options: .regularExpression) else { return nil }
+        guard let n = Double(t[r].filter(\.isNumber)) else { return nil }
+        return min(max(n / 100, 0), 0.99)
+    }
+    static func flog(_ s: String) {
+        let line = "\(Date())  \(s)\n"
+        if let h = FileHandle(forWritingAtPath: "/tmp/bridge-focus.log") { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile() }
+        else { try? line.write(toFile: "/tmp/bridge-focus.log", atomically: true, encoding: .utf8) }
+    }
+    /// `label` is what the island shows for 12 s: "T115 Credit re-freeze" or "Pro · Account-free features".
+    private func finished(_ title: String, _ body: String, label: String) {
+        Self.flog("finished: \(title) — \(body) · activity=\(activity != nil)")
+        justDone = label; justDoneUntil = Date().addingTimeInterval(12)
+        pendingAlert = (title, body)
+        if activity == nil { Notifier.post(title, body) }   // no Live Activity running: fall back to a banner
+    }
+
+    private func trackFocus(_ s: Snapshot, _ live: [BTask], _ st: BridgeAttributes.ContentState) -> (focus: String, pct: Double) {
+        let now = Date()
+        let byId = Dictionary(s.tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        func runnerSince(_ id: String) -> Date? { s.runners.first(where: { $0.id == id })?.since.map { Date(timeIntervalSince1970: $0) } }
+
+        // Board tasks: first time seen live, and the moment they leave live as done.
+        for t in live where liveSeen[t.id] == nil {
+            let h = t.holder ?? "any"
+            Self.flog("live: T\(t.id) \(h)")
+            liveSeen[t.id] = (min(now, runnerSince(h) ?? now), h, t.title)
+        }
+        var doneBy = Set<String>()
+        for (id, seen) in liveSeen where !live.contains(where: { $0.id == id }) {
+            liveSeen[id] = nil
+            guard let t = byId[id], t.isDone else { continue }       // released or reassigned: no alert
+            record(seen.holder, now.timeIntervalSince(seen.start))
+            doneBy.insert(seen.holder)
+            let res = (t.result ?? "").split(separator: "\n").first.map(String.init) ?? ""
+            finished("T\(id) done", "\(Glance.name(seen.holder)): \(t.title)" + (res.isEmpty ? "" : " — " + String(res.prefix(140))), label: "T\(id) \(t.title)")
+        }
+
+        // Chat work with no board task (Ultra / Pro in a conversation): done when the runner stops working for 20 s.
+        for r in ["ultra", "pro"] {
+            let state = r == "ultra" ? st.ultra : st.pro
+            let holdsTask = live.contains { $0.holder == r }
+            if state == "working" {
+                chatStop[r] = nil
+                if chatSince[r] == nil { chatSince[r] = runnerSince(r) ?? now }
+                let on = r == "ultra" ? st.ultraOn : st.proOn
+                if !on.isEmpty { chatTitle[r] = on }
+            } else if let start = chatSince[r] {
+                let stop = chatStop[r] ?? now
+                chatStop[r] = stop
+                if now.timeIntervalSince(stop) >= 20 {
+                    chatSince[r] = nil; chatStop[r] = nil
+                    let secs = stop.timeIntervalSince(start)
+                    if !holdsTask && !doneBy.contains(r) && secs >= 90 && !Glance.off(state) {
+                        record("chat." + r, secs)
+                        let title = chatTitle[r].map { Glance.split($0).title.isEmpty ? $0 : Glance.split($0).title } ?? "its chat"
+                        finished("\(Glance.name(r)) finished", title + (state == "waiting" ? " — waiting on you" : ""), label: "\(Glance.name(r)) · \(title)")
+                    }
+                    chatTitle[r] = nil
+                }
+            }
+        }
+
+        // What the fill shows: the runner the island leads with (Glance.current), its board task if it holds one.
+        guard let r = Glance.current(st) else { return ("", -1) }
+        if let t = live.first(where: { $0.holder == r.id }) {
+            if let p = Self.reported(t.progress) { return ("T\(t.id)", p) }
+            let start = liveSeen[t.id]?.start ?? now
+            return ("T\(t.id)", Self.estimate(elapsed: now.timeIntervalSince(start), expected: expected(r.id, r.id == "local" ? 240 : 600)))
+        }
+        guard r.state == "working", let start = chatSince[r.id] ?? r.since else { return (r.code, -1) }
+        return (r.code, Self.estimate(elapsed: now.timeIntervalSince(start), expected: expected("chat." + r.id, 300)))
     }
 
     // MARK: vault import

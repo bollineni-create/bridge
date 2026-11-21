@@ -162,9 +162,10 @@ struct IslandHead: View {
     var body: some View {
         let id = Glance.current(s).map { Glance.split(Glance.task($0, s)).id } ?? ""
         let label = s.waiting.isEmpty || Glance.current(s) != nil ? "Now" : "Up next"
-        Text(id.isEmpty ? label : "\(label) · \(id)")
+        let done = !s.justDone.isEmpty
+        Text(done ? "✓ Done" : (id.isEmpty ? label : "\(label) · \(id)"))
             .font(Glance.mono(12 * k, .semibold)).textCase(.uppercase).tracking(1.2 * k)
-            .foregroundStyle(Glance.second).lineLimit(1).fixedSize()
+            .foregroundStyle(done ? Glance.doneGreen : Glance.second).lineLimit(1).fixedSize()
     }
 }
 
@@ -220,6 +221,7 @@ struct RunnerTile: View {
 }
 
 extension Glance {
+    static let doneGreen = Color(red: 0.188, green: 0.820, blue: 0.345)   // #30D158, the finish flash
     static let wash = Color(red: 0.094, green: 0.094, blue: 0.094)   // #181818, the night room's resting tile
 }
 
@@ -231,7 +233,13 @@ struct IslandLanes: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12 * k) {
             Group {
-                if let r = Glance.current(s) {
+                if !s.justDone.isEmpty {
+                    // Just finished (12 s, with the alert): the finished task takes the hero spot in green.
+                    Text(s.justDone).font(Glance.a(19 * k, 700, width: 100)).tracking(-19 * k * 0.015).foregroundStyle(Glance.doneGreen)
+                        .lineLimit(1).truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if let r = Glance.current(s) {
                     let on = Glance.task(r, s)
                     let t = Glance.split(on)
                     let title = on.isEmpty ? "\(Glance.name(r.id)) is working" : (t.title.isEmpty ? (t.id.isEmpty ? on : t.id) : t.title)

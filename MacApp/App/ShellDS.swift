@@ -58,7 +58,7 @@ struct SidebarDS: View {
             .padding(.horizontal, 18).padding(.bottom, 12)
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 2) {
-                    row(.command); row(.board); row(.needs); row(.qwen, "Qwen")
+                    row(.chat); row(.command); row(.board); row(.needs); row(.qwen, "Qwen")
                     section("Feeds")
                     row(.calendar); row(.reminders); row(.messages); row(.mail); row(.notes)
                     section("Control")
@@ -109,6 +109,7 @@ extension Pane {
     /// Line glyphs for the neutral tiles (SF Symbols).
     var dsIcon: String {
         switch self {
+        case .chat: return "bubble.left.and.text.bubble.right"
         case .command: return "square.grid.2x2"
         case .board: return "list.bullet"
         case .needs: return "bell"

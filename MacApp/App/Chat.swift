@@ -72,7 +72,7 @@ final class QwenChat: ObservableObject {
             var sys = QwenChat.system + "\nNow: " + Date().formatted(date: .complete, time: .shortened) + "."
             if withContext {
                 let ctx = await bg { runBridge(["gather", text]) }.1
-                if !ctx.isEmpty, !ctx.hasPrefix("(nothing") { sys += "\n\nLIVE FROM THIS MAC:\n" + ctx }
+                if !ctx.isEmpty, !ctx.hasPrefix("(nothing") { sys += "\n\nLIVE FROM THE OWNER'S MAC:\n" + ctx }
             }
             var messages: [[String: String]] = [["role": "system", "content": sys]]
             for m in history.suffix(24) { messages.append(["role": m.role, "content": m.text]) }
@@ -217,7 +217,7 @@ struct QwenView: View {
 
     func handOff(_ who: String) {
         guard let t = chat.thread else { return }
-        let text = t.msgs.suffix(6).map { ($0.role == "user" ? "You: " : "Qwen: ") + $0.text }.joined(separator: "\n\n")
+        let text = t.msgs.suffix(6).map { ($0.role == "user" ? "the owner: " : "Qwen: ") + $0.text }.joined(separator: "\n\n")
         store.cli(["ask", "Continue this from my Qwen chat and finish it:\n\n" + text, "--who", who])
     }
 }

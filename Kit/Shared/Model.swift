@@ -10,7 +10,22 @@ struct Snap: Decodable {
     var counts: Counts?
     var attention: [Attn]?
     var actions: [Act]?
+    var convos: [PConvo]?               // Bridge Chat (engine bridge_convo.py)
+    var convo_options: PConvoOptions?
 }
+struct PConvo: Decodable, Identifiable, Equatable {
+    var id: Int; var title: String; var updated: Double?; var runner: String?; var chat: String?; var model: String?; var effort: String?
+    var status: String?; var msgs: [PMsg]?; var steps: [PStep]?
+}
+struct PMsg: Decodable, Identifiable, Equatable {
+    var id: Int; var ts: Double?; var role: String; var runner: String?; var kind: String?; var text: String?; var task: Int?; var turn: Int?; var state: String?
+}
+struct PStep: Decodable, Identifiable, Equatable {
+    var id: Int; var turn: Int?; var idx: Int; var title: String; var runner: String?; var status: String?; var task: Int?
+    var model: String?; var effort: String?; var after: [Int]?; var progress: String?
+}
+struct PConvoOptions: Decodable { var models: [String]?; var efforts: [String]?; var runners: [PRunnerOpt]? }
+struct PRunnerOpt: Decodable, Identifiable { var id: String; var name: String; var kind: String }
 struct Probe: Decodable { var open: String?; var step: String?; var generating: Bool?; var running: [String]? }
 struct Runner: Decodable, Identifiable {
     var id: String
