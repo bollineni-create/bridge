@@ -128,6 +128,25 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
                 Task { @MainActor in self.probeNow = true }
             }
         }
+        // Bridge Chat waits on a reply in a Claude chat that is not the open one: read just those chats, then put the window back.
+        // Skipped while that Claude app is in front (the owner is using it); the engine asks again later.
+        if !sweeping, let d = FileManager.default.contents(atPath: "/tmp/bridge-read-chat.json"),
+           let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let who = j["who"] as? String, let titles = j["titles"] as? [String],
+           !ClaudeApps.isFront(who == "pro" ? ClaudeApps.pro : "/Applications/Claude.app") {   // hold the request while the owner is in that Claude app; read the moment he leaves it
+            try? FileManager.default.removeItem(atPath: "/tmp/bridge-read-chat.json")
+            let path = who == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
+            sweeping = true
+            DispatchQueue.global(qos: .utility).async {
+                defer { Task { @MainActor in self.sweeping = false } }
+                guard !ClaudeApps.isFront(path), let first = AppProbe.chatRead(path, maxChars: 1000), (first["window"] as? Bool) == true else { return }
+                let original = first["open"] as? String ?? ""
+                for title in titles.prefix(3) where title != original {
+                    guard AppProbe.focusChat(path, title) == title, let got = AppProbe.chatReadSettled(path) else { continue }
+                    if let d = try? JSONSerialization.data(withJSONObject: [who: got]), let s = String(data: d, encoding: .utf8) { _ = runBridge(["probe", "--sweep"], stdin: s) }
+                }
+                if !original.isEmpty { _ = AppProbe.focusChat(path, original) }
+            }
+        }
         if FileManager.default.fileExists(atPath: "/tmp/bridge-probe-now") { try? FileManager.default.removeItem(atPath: "/tmp/bridge-probe-now"); probeNow = true }   // Bridge Chat waits on a Claude reply
         if ticks % 60 == 0 && !sweeping && snap?.settings["read_windows"] != "0" && AppProbe.idleSeconds() > 240 { sweepChats() }
         // Reading another app's window makes macOS show its own "Bridge is accessing…" pill, which squeezes the Live Activity.

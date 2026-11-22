@@ -233,7 +233,9 @@ enum AppProbe {
             let boxes = flat(path, limit: 40000).filter { $0.1 == "AXTextArea" }
             let b = boxes.last(where: { $0.2.hasPrefix("Write your prompt") })?.0 ?? boxes.last?.0
             let v = b.flatMap { attr($0, kAXValueAttribute) as? String } ?? "x"
-            if let b, v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { AXUIElementSetAttributeValue(b, kAXValueAttribute as CFString, "" as CFString) }
+            // a fresh session's box holds invisible characters (zero-width spaces): those are not a draft
+            let invisible = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{200B}\u{200C}\u{200D}\u{2060}\u{FEFF}\u{00A0}"))
+            if let b, v.trimmingCharacters(in: invisible).isEmpty { AXUIElementSetAttributeValue(b, kAXValueAttribute as CFString, "" as CFString) }
             else { return "fail: there is unsent text in the message box (\(v.count) characters; left untouched)" }      // his own draft: never overwrite it
         }
         var picked = ""
