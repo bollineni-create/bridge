@@ -57,7 +57,7 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
         // and pushes fresh state on the first snapshot, so a stale pill lasts about a second instead of losing the slot.
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in Task { @MainActor in self.tick() } }
         // send requests from the engine (ax-post etc.) are picked up within 0.15 s, not on the next 1 s tick
-        Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { _ in Task { @MainActor in self.selfCheck(); self.actNow(); self.probeNowFast(); self.copyNow() } }
+        Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { _ in Task { @MainActor in self.selfCheck(); self.actNow(); self.probeNowFast(); self.copyNow(); self.deleteNow() } }
         NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: kit.store, queue: .main) { _ in Task { @MainActor in await self.pushKit() } }
         Task {
             await kit.request()
@@ -517,6 +517,34 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
         DispatchQueue.global(qos: .userInitiated).async {
             let txt = AppProbe.copyReply(path, marker: parts[1]) ?? ""
             try? txt.write(toFile: parts[2], atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// Engine hook: /tmp/bridge-delete-request.json = {"who", "titles": [...], "pattern", "out"} → deletes the listed Claude chats that
+    /// verify as Bridge test chats (see AppProbe.deleteChat), one line per chat in "out", then "DONE". Never deletes an unverified chat.
+    func deleteNow() {
+        let f = "/tmp/bridge-delete-request.json"
+        guard let d = FileManager.default.contents(atPath: f), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let who = j["who"] as? String, let titles = j["titles"] as? [String], let pattern = j["pattern"] as? String, let out = j["out"] as? String else { return }
+        try? FileManager.default.removeItem(atPath: f)
+        let path = who == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
+        DispatchQueue.global(qos: .utility).async {
+            var log = ""
+            let original = (AppProbe.chatRead(path, maxChars: 500)?["open"] as? String) ?? ""
+            for title in titles where title != original {
+                for _ in 0..<4 {            // chats can share a title: keep going while one was deleted
+                    let r = AppProbe.deleteChat(path, title: title, nth: 0, pattern: pattern)
+                    log += "\(r)\t\(title)\n"
+                    try? log.write(toFile: out, atomically: true, encoding: .utf8)
+                    if r != "deleted" { break }
+                    // Claude redraws its sidebar after a delete: wait until the chat list is back before looking for the next one
+                    AppProbe.waitUntil(8.0) { ((AppProbe.chatRead(path, maxChars: 200)?["recents"] as? [String]) ?? []).count > 0 }
+                    Thread.sleep(forTimeInterval: 0.4)
+                }
+            }
+            if !original.isEmpty { _ = AppProbe.focusChat(path, original) }
+            log += "DONE\n"
+            try? log.write(toFile: out, atomically: true, encoding: .utf8)
         }
     }
 

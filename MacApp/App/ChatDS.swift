@@ -48,6 +48,7 @@ struct ConvoStep: Decodable, Identifiable, Equatable {
     var progress: String
     var split: Bool
     var partial: String? = nil       // the reply so far, while the runner is still writing it
+    var thinking: String? = nil      // Claude's own status line while it works
 }
 
 struct ConvoOptions: Decodable {
@@ -260,7 +261,10 @@ struct ChatDSView: View {
     func workingLine(_ c: Convo) -> String {
         let live = c.steps.filter { ["pending", "queued", "working"].contains($0.status) }
         if live.isEmpty { return "Bridge is working out who should take this…" }
-        return live.map { "\(DS.name($0.runner)) \($0.status == "working" ? "is on it" : "has it queued")" }.joined(separator: " · ")
+        return live.map { s in
+            if s.status == "working", let t = s.thinking, !t.isEmpty { return "\(DS.name(s.runner)): \(t)\u{2026}" }
+            return "\(DS.name(s.runner)) \(s.status == "working" ? "is on it" : "has it queued")"
+        }.joined(separator: " · ")
     }
 
     var empty: some View {

@@ -345,6 +345,44 @@ enum AppProbe {
         return text
     }
 
+    /// Delete one chat for good, but only after opening it and confirming that every message the owner sent in it matches `pattern`
+    /// (used to clear out Bridge's own test chats). Anything else is left alone. Returns "deleted", "keep: …" or "skip: …".
+    static func deleteChat(_ path: String, title: String, nth: Int, pattern: String) -> String {
+        withWindow(path) {
+            let landed = focusChat(path, title, nth: nth)
+            guard landed == title else { return "skip: could not open (\(landed))" }
+            // the conversation draws a moment after the chat opens: wait for it rather than judging an empty page
+            var read0: [String: Any]?
+            waitUntil(4.0) { read0 = chatRead(path); return (read0?["open"] as? String) == title && ((read0?["turns"] as? [[String: String]])?.isEmpty == false) }
+            guard let got = read0, (got["open"] as? String) == title, (got["generating"] as? Bool) != true,
+                  let turns = got["turns"] as? [[String: String]] else { return "skip: could not read it" }
+            let mine = turns.filter { $0["role"] == "the owner" }
+            guard !mine.isEmpty, mine.allSatisfy({ ($0["text"] ?? "").range(of: pattern, options: .regularExpression) != nil }) else {
+                let odd = mine.first(where: { ($0["text"] ?? "").range(of: pattern, options: .regularExpression) == nil })?["text"] ?? ""
+                return "keep: not a test chat (\(mine.count) of his messages; one starts: \(odd.prefix(70).replacingOccurrences(of: "\n", with: " ")))"
+            }
+            guard let menu = flat(path, limit: 40000).last(where: { $0.1 == "AXPopUpButton" && $0.2 == "More options for " + title })?.0 else { return "skip: no menu" }
+            AXUIElementPerformAction(menu, kAXPressAction as CFString)
+            waitUntil(2.5) { flat(path).contains { $0.1 == "AXMenuItem" && ($0.2 == "Delete" || $0.2.hasPrefix("Delete ")) } }     // the menu fills in over a moment
+            let items = flat(path).filter { $0.1 == "AXMenuItem" }
+            guard let del = items.first(where: { $0.2 == "Delete" || $0.2.hasPrefix("Delete ") })?.0 else {
+                escape(path)
+                return "skip: no Delete in the menu (\(items.map { $0.2 }.joined(separator: ", ")))"
+            }
+            AXUIElementPerformAction(del, kAXPressAction as CFString)
+            var confirm: AXUIElement?
+            waitUntil(2.0) { confirm = flat(path, limit: 40000).last(where: { $0.1 == "AXButton" && ($0.2 == "Delete" || $0.2.hasPrefix("Delete ")) })?.0; return confirm != nil }
+            guard let confirm else {
+                let seen = flat(path, limit: 40000).filter { $0.1 == "AXButton" }.suffix(12).map { $0.2 }.joined(separator: ", ")
+                escape(path)
+                return "skip: no confirm button (\(seen))"
+            }
+            AXUIElementPerformAction(confirm, kAXPressAction as CFString)
+            let gone = waitUntil(3.0) { ((read(path)?["open"] as? String) ?? "") != title }
+            return gone ? "deleted" : "skip: still open after confirming"
+        }
+    }
+
     /// Press the permission button the owner picked in Bridge Chat: open its chat if named, then press the last button with exactly that title.
     static func pressButton(_ path: String, chat: String, title: String) -> String {
         withWindow(path) { pressButtonLocked(path, chat: chat, title: title) }
@@ -430,10 +468,12 @@ enum AppProbe {
             }
             let me = Int(bitPattern: UInt(CFHash(e)))
             for k in (v[3] as? [AXUIElement]) ?? [] { walk(k, d + 1, me, inButton || role == "AXButton", inLink || role == "AXLink") }
+            if role == "AXGroup" && title == "Currently streaming message" { items.append(("se", "", parent)) }     // the end of the reply being written
         }
         let wins = (attr(r, kAXWindowsAttribute) as? [AXUIElement]) ?? []
         for w in wins { walk(w, 0, 0, false) }
         var running: [String] = [], unread: [String] = [], more: [String] = [], buttons = Set<String>(), generating = false, step = "", model = ""
+        var thinking = ""        // Claude's own status line while it works ("Drafting five paragraphs on how glaciers move")
         for (k, t, _) in items {
             if k == "b" {
                 buttons.insert(t)
@@ -441,6 +481,7 @@ enum AppProbe {
                 else if t.hasSuffix(" Running") { running.append(String(t.dropLast(8))) }
                 else if t.hasSuffix(" Unread response") { unread.append(String(t.dropLast(16))) }     // a finished reply in a chat that is not open
                 else if t.hasPrefix("Using ") { step = t }
+                else if t.hasSuffix(" running") { thinking = String(t.dropLast(8)) }
             } else if k == "p" {
                 if t.hasPrefix("More options for ") { more.append(String(t.dropFirst(17))) }
                 else if t == "More options" { more.append("Untitled") }      // a chat Claude has not named yet: its row reads "Untitled", its menu just "More options"
@@ -469,17 +510,22 @@ enum AppProbe {
         var turns: [[String: String]] = []
         var cur: [String: String]? = nil
         var lastParent = -1, lastBottom = -1.0, lastCtl = ("", "")     // the last button/link/heading seen: its label text follows it
-        var lead = "", answerFound = true, markerAt = -1, cellPending = false
+        var lead = "", answerFound = true, markerAt = -1, cellPending = false, streaming = false
         func norm(_ x: String) -> String {
             x.replacingOccurrences(of: "\u{2019}", with: "'").replacingOccurrences(of: "\u{2018}", with: "'").trimmingCharacters(in: .whitespacesAndNewlines)
         }
         func flush() {
             if let c = cur, !(c["text"] ?? "").isEmpty { turns.append(c) }
-            cur = nil; lastParent = -1; lastBottom = -1; lead = ""; answerFound = true; markerAt = -1; cellPending = false
+            cur = nil; lastParent = -1; lastBottom = -1; lead = ""; answerFound = true; markerAt = -1; cellPending = false; streaming = false
         }
         for (idx, (k, t, par)) in items.enumerated() {
             if k == "x" { if t == "Message actions" { flush() }; continue }
-            if k == "s" { flush(); cur = ["role": "Claude", "text": ""]; continue }
+            // a reply still being written: marked "live" so the engine never takes it for a finished answer, and closed where its own
+            // group ends, so the composer and footer after it never get in
+            if k == "s" { flush(); cur = ["role": "Claude", "text": "", "live": "1"]; streaming = true; continue }
+            if k == "se" { flush(); continue }
+            // while Claude is still writing, its status words sit where the reply will be: they are not the reply
+            if streaming, k == "t" || k == "bt", ["running", "Claude is thinking", "Claude is responding", thinking].contains(t.trimmingCharacters(in: .whitespaces)) { continue }
             if k == "row" {
                 if cur != nil, let txt = cur?["text"], !txt.isEmpty, !txt.hasSuffix("\n") { cur!["text"]! += "\n" }
                 cellPending = false; lastParent = -2; lastBottom = -1
@@ -569,7 +615,7 @@ enum AppProbe {
         if step.hasSuffix(" running") { step = String(step.dropLast(8)) }
         if let c = step.range(of: ": "), step.count > 80 { step = String(step[..<c.lowerBound]) }
         return ["window": count > 40, "open": open, "running": running, "generating": generating, "step": String(step.prefix(90)),
-                "model": model, "recents": Array(recents.prefix(60)), "unread": unread.filter { more.contains($0) }, "turns": keep, "turn_count": turns.count, "permission": permission ?? NSNull()]
+                "model": model, "thinking": generating ? thinking : "", "recents": Array(recents.prefix(60)), "unread": unread.filter { more.contains($0) }, "turns": keep, "turn_count": turns.count, "permission": permission ?? NSNull()]
     }
 
     /// chatRead, with one more try when the tree came back empty: the first read after a Claude window starts (or after Bridge
