@@ -56,6 +56,8 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
         // new one can only be requested while Bridge is frontmost. updateActivity() adopts the surviving activity, ends extras
         // and pushes fresh state on the first snapshot, so a stale pill lasts about a second instead of losing the slot.
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in Task { @MainActor in self.tick() } }
+        // send requests from the engine (ax-post etc.) are picked up within 0.15 s, not on the next 1 s tick
+        Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { _ in Task { @MainActor in self.selfCheck(); self.actNow(); self.probeNowFast(); self.copyNow(); self.deleteNow() } }
         NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: kit.store, queue: .main) { _ in Task { @MainActor in await self.pushKit() } }
         Task {
             await kit.request()
@@ -132,19 +134,31 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
         // Skipped while that Claude app is in front (the owner is using it); the engine asks again later.
         if !sweeping, let d = FileManager.default.contents(atPath: "/tmp/bridge-read-chat.json"),
            let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let who = j["who"] as? String, let titles = j["titles"] as? [String],
-           !ClaudeApps.isFront(who == "pro" ? ClaudeApps.pro : "/Applications/Claude.app") {   // hold the request while the owner is in that Claude app; read the moment he leaves it
+           // hold the request while the owner is actually using that Claude app (input in the last 30 s); a window Bridge itself brought forward does not count
+           !(ClaudeApps.isFront(who == "pro" ? ClaudeApps.pro : "/Applications/Claude.app") && AppProbe.idleSeconds() < 30) {
             try? FileManager.default.removeItem(atPath: "/tmp/bridge-read-chat.json")
             let path = who == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
             sweeping = true
             DispatchQueue.global(qos: .utility).async {
                 defer { Task { @MainActor in self.sweeping = false } }
-                guard !ClaudeApps.isFront(path), let first = AppProbe.chatRead(path, maxChars: 1000), (first["window"] as? Bool) == true else { return }
+                guard !(ClaudeApps.isFront(path) && AppProbe.idleSeconds() < 30), let first = AppProbe.chatRead(path, maxChars: 1000), (first["window"] as? Bool) == true else { return }
+                AppProbe.withWindow(path) {
                 let original = first["open"] as? String ?? ""
-                for title in titles.prefix(3) where title != original {
-                    guard AppProbe.focusChat(path, title) == title, let got = AppProbe.chatReadSettled(path) else { continue }
-                    if let d = try? JSONSerialization.data(withJSONObject: [who: got]), let s = String(data: d, encoding: .utf8) { _ = runBridge(["probe", "--sweep"], stdin: s) }
+                let marker = j["marker"] as? String ?? ""
+                // Claude can give two chats the same name: try each one with that title until the read holds this task's marker
+                search: for title in titles.prefix(4) {
+                    for n in 0..<4 {
+                        // a chat Claude has not named yet sits in the sidebar as "New chat" / "Untitled": its header will not echo that name, so the task marker alone decides
+                        let unnamed = ["New chat", "Untitled"].contains(title)
+                        let landed = AppProbe.focusChat(path, title, nth: n)
+                        guard landed == title || (unnamed && landed != "not found" && landed != "no access"), let got = AppProbe.chatReadSettled(path) else { break }
+                        let hit = marker.isEmpty || ((got["turns"] as? [[String: String]]) ?? []).contains { ($0["text"] ?? "").contains(marker) }
+                        if hit, let d = try? JSONSerialization.data(withJSONObject: [who: got]), let s = String(data: d, encoding: .utf8) { _ = runBridge(["probe", "--sweep"], stdin: s) }
+                        if hit && !marker.isEmpty { break search }
+                    }
                 }
                 if !original.isEmpty { _ = AppProbe.focusChat(path, original) }
+                }
             }
         }
         if FileManager.default.fileExists(atPath: "/tmp/bridge-probe-now") { try? FileManager.default.removeItem(atPath: "/tmp/bridge-probe-now"); probeNow = true }   // Bridge Chat waits on a Claude reply
@@ -163,17 +177,7 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
             else if let f = hotFlip, Date().timeIntervalSince(f) > 4, f > lastProbe, sinceProbe > 120 { due = true }
             if probeNow { due = true; probeNow = false }
         }
-        if due {
-            lastProbe = Date()
-            probing = true
-            DispatchQueue.global(qos: .utility).async {
-                var out: [String: Any] = [:]
-                if let u = AppProbe.chatReadSettled("/Applications/Claude.app") { out["ultra"] = u }
-                if let p = AppProbe.chatReadSettled(ClaudeApps.pro) { out["pro"] = p }
-                if !out.isEmpty, let d = try? JSONSerialization.data(withJSONObject: out), let j = String(data: d, encoding: .utf8) { _ = runBridge(["probe"], stdin: j) }
-                Task { @MainActor in self.probing = false }
-            }
-        }
+        if due { probeWindows() }
         if ticks % 60 == 0 { Task { await pushKit() } }
         if ticks % 60 == 30, !locator.last.isEmpty { let j = locator.last; DispatchQueue.global().async { _ = runBridge(["ingest", "location"], stdin: j) } }
         if ticks % 6 == 0, snap?.settings["music_on"] != "0" { DispatchQueue.global().async { _ = runBridge(["music-sync"]) } }
@@ -462,6 +466,85 @@ func bg<T>(_ f: @escaping () -> T) async -> T {
                 let id = String(a.id)
                 DispatchQueue.global().async { _ = runBridge(["action-run", id]) }
             }
+        }
+    }
+
+    /// The engine appends an action id to /tmp/bridge-act-now the moment it queues an app-py action (a send into Claude):
+    /// run it now rather than on the next snapshot read. `running` keeps the snapshot path from starting it a second time,
+    /// and the engine's action-start refuses an action that is no longer queued.
+    func actNow() {
+        let f = "/tmp/bridge-act-now"
+        guard FileManager.default.fileExists(atPath: f), let txt = try? String(contentsOfFile: f, encoding: .utf8) else { return }
+        try? FileManager.default.removeItem(atPath: f)
+        for line in txt.split(separator: "\n") {
+            guard let id = Int(line.trimmingCharacters(in: .whitespaces)), !running.contains(id) else { continue }
+            running.insert(id)
+            DispatchQueue.global().async { _ = runBridge(["action-run", String(id)]) }
+        }
+    }
+
+    /// Read both Claude windows once and hand them to the engine.
+    func probeWindows() {
+        guard !probing else { return }
+        lastProbe = Date()
+        probing = true
+        DispatchQueue.global(qos: .utility).async {
+            var out: [String: Any] = [:]
+            if let u = AppProbe.chatReadSettled("/Applications/Claude.app") { out["ultra"] = u }
+            if let p = AppProbe.chatReadSettled(ClaudeApps.pro) { out["pro"] = p }
+            if !out.isEmpty, let d = try? JSONSerialization.data(withJSONObject: out), let j = String(data: d, encoding: .utf8) { _ = runBridge(["probe"], stdin: j) }
+            Task { @MainActor in self.probing = false }
+        }
+    }
+
+    /// Bridge Chat is waiting on a Claude reply: read the windows the moment the engine asks (checked every 0.15 s).
+    func probeNowFast() {
+        let f = "/tmp/bridge-probe-now"
+        guard FileManager.default.fileExists(atPath: f), !probing, snap?.settings["read_windows"] != "0" else { return }
+        try? FileManager.default.removeItem(atPath: f)
+        probeWindows()
+    }
+
+    /// Engine hook: /tmp/bridge-copy-request = "<who>\t<marker>\t<result file>" → the reply's exact text in <result file> (empty if not ours / not found).
+    /// Its own file, so it never collides with ax-post on /tmp/bridge-ui-request.
+    func copyNow() {
+        let f = "/tmp/bridge-copy-request"
+        guard let req = try? String(contentsOfFile: f, encoding: .utf8) else { return }
+        try? FileManager.default.removeItem(atPath: f)
+        let parts = req.trimmingCharacters(in: .newlines).components(separatedBy: "\t")
+        guard parts.count == 3 else { return }
+        let path = parts[0] == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
+        DispatchQueue.global(qos: .userInitiated).async {
+            let txt = AppProbe.copyReply(path, marker: parts[1]) ?? ""
+            try? txt.write(toFile: parts[2], atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// Engine hook: /tmp/bridge-delete-request.json = {"who", "titles": [...], "pattern", "out"} → deletes the listed Claude chats that
+    /// verify as Bridge test chats (see AppProbe.deleteChat), one line per chat in "out", then "DONE". Never deletes an unverified chat.
+    func deleteNow() {
+        let f = "/tmp/bridge-delete-request.json"
+        guard let d = FileManager.default.contents(atPath: f), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let who = j["who"] as? String, let titles = j["titles"] as? [String], let pattern = j["pattern"] as? String, let out = j["out"] as? String else { return }
+        try? FileManager.default.removeItem(atPath: f)
+        let path = who == "pro" ? ClaudeApps.pro : "/Applications/Claude.app"
+        DispatchQueue.global(qos: .utility).async {
+            var log = ""
+            let original = (AppProbe.chatRead(path, maxChars: 500)?["open"] as? String) ?? ""
+            for title in titles where title != original {
+                for _ in 0..<4 {            // chats can share a title: keep going while one was deleted
+                    let r = AppProbe.deleteChat(path, title: title, nth: 0, pattern: pattern)
+                    log += "\(r)\t\(title)\n"
+                    try? log.write(toFile: out, atomically: true, encoding: .utf8)
+                    if r != "deleted" { break }
+                    // Claude redraws its sidebar after a delete: wait until the chat list is back before looking for the next one
+                    AppProbe.waitUntil(8.0) { ((AppProbe.chatRead(path, maxChars: 200)?["recents"] as? [String]) ?? []).count > 0 }
+                    Thread.sleep(forTimeInterval: 0.4)
+                }
+            }
+            if !original.isEmpty { _ = AppProbe.focusChat(path, original) }
+            log += "DONE\n"
+            try? log.write(toFile: out, atomically: true, encoding: .utf8)
         }
     }
 

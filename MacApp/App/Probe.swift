@@ -75,7 +75,8 @@ enum AppProbe {
             let title = str(e, kAXTitleAttribute), desc = str(e, kAXDescriptionAttribute)
             let val = (attr(e, kAXValueAttribute) as? String) ?? ""
             let sub = str(e, kAXSubroleAttribute)
-            if ["AXWindow", "AXButton", "AXHeading", "AXLink", "AXTextArea", "AXPopUpButton", "AXProgressIndicator", "AXBusyIndicator"].contains(role) || role == "AXStaticText" && d < 200 {
+            let all = FileManager.default.fileExists(atPath: "/tmp/bridge-dump-all")     // debug: every role (lists, groups), not only controls
+            if all || ["AXWindow", "AXButton", "AXHeading", "AXLink", "AXTextArea", "AXPopUpButton", "AXProgressIndicator", "AXBusyIndicator"].contains(role) || role == "AXStaticText" && d < 200 {
                 let shown = role == "AXStaticText" ? "len=\(val.count) \(val.prefix(40))" : "t=\(title.prefix(70)) d=\(desc.prefix(70)) v=\(role == "AXTextArea" ? "len=\(val.count)" : String(val.prefix(40)))"
                 out.append(String(repeating: " ", count: min(d, 30)) + "\(role) \(sub) \(shown)")
             }
@@ -140,6 +141,29 @@ enum AppProbe {
         return out
     }
 
+    /// One window-changing job at a time per Claude app (post, chat switch, button press). Two at once could click the window
+    /// to another chat halfway through a send, losing the message.
+    private static var locks: [String: NSLock] = [:]
+    private static let locksGuard = NSLock()
+    static func withWindow<T>(_ path: String, _ body: () -> T) -> T {
+        locksGuard.lock(); let l = locks[path] ?? NSLock(); locks[path] = l; locksGuard.unlock()
+        l.lock(); defer { l.unlock() }
+        return body()
+    }
+
+    /// Whitespace plus the zero-width characters a fresh Claude composer holds: neither is a draft or an unsent message.
+    static let invisibleSet = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{200B}\u{200C}\u{200D}\u{2060}\u{FEFF}\u{00A0}"))
+
+    /// Poll (every 50 ms) until `cond` holds or `timeout` passes. Replaces fixed sleeps so each step moves on the moment the window is ready.
+    @discardableResult
+    static func waitUntil(_ timeout: Double, _ cond: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(timeout)
+        repeat { if cond() { return true }; Thread.sleep(forTimeInterval: 0.05) } while Date() < end
+        return cond()
+    }
+
+    static func menuOpen(_ path: String) -> Bool { flat(path).contains { $0.1 == "AXMenuItem" } }
+
     /// The composer's model picker ("Model: Opus 5.5 Medium").
     static func modelPicker(_ path: String) -> (AXUIElement, String)? {
         flat(path).last { $0.1 == "AXPopUpButton" && $0.2.hasPrefix("Model: ") }.map { ($0.0, $0.2) }
@@ -184,18 +208,19 @@ enum AppProbe {
     static func pickMenu(_ path: String, via: String?, prefix: String) -> Bool {
         guard let (pick, _) = modelPicker(path) else { return false }
         AXUIElementPerformAction(pick, kAXPressAction as CFString)
-        Thread.sleep(forTimeInterval: 0.7)
+        let matches: ((AXUIElement, String, String)) -> Bool = { $0.1 == "AXMenuItem" && ($0.2 == prefix || $0.2.hasPrefix(prefix + " ")) }
+        waitUntil(1.5) { menuOpen(path) }
         var items = flat(path).filter { $0.1 == "AXMenuItem" }
         if let via {
             guard let sub = items.first(where: { $0.2.hasPrefix(via) }) else { escape(path); return false }
             AXUIElementPerformAction(sub.0, kAXPressAction as CFString)
-            Thread.sleep(forTimeInterval: 0.7)
+            waitUntil(1.5) { flat(path).contains(where: matches) }
             items = flat(path).filter { $0.1 == "AXMenuItem" }
         }
-        guard let hit = items.last(where: { $0.2 == prefix || $0.2.hasPrefix(prefix + " ") }) else { escape(path); escape(path); return false }
+        guard let hit = items.last(where: matches) else { escape(path); escape(path); return false }
         AXUIElementPerformAction(hit.0, kAXPressAction as CFString)
-        Thread.sleep(forTimeInterval: 0.7)
-        if modelPicker(path).map({ _ in flat(path).contains { $0.1 == "AXMenuItem" } }) == true { escape(path); Thread.sleep(forTimeInterval: 0.3) }
+        waitUntil(1.0) { !menuOpen(path) }
+        if menuOpen(path) { escape(path); waitUntil(0.5) { !menuOpen(path) } }
         return true
     }
 
@@ -218,14 +243,22 @@ enum AppProbe {
     /// Send a message without bringing the window forward: open the chat (or a new one), set model + effort, fill the box, press Send.
     /// Returns "ok: …", "limit: …" or "fail: …" (the engine falls back to keystrokes on fail).
     static func post(_ path: String, text: String, newChat: Bool, chat: String, model: String, effort: String) -> String {
+        withWindow(path) { postLocked(path, text: text, newChat: newChat, chat: chat, model: model, effort: effort) }
+    }
+
+    private static func postLocked(_ path: String, text: String, newChat: Bool, chat: String, model: String, effort: String) -> String {
         guard root(path) != nil else { return "fail: no access to the Claude window" }
         if !chat.isEmpty {
             let got = focusChat(path, chat)
             if got != chat { return "fail: could not open the chat \u{201C}\(chat)\u{201D} (\(got))" }
         } else if newChat {
-            guard let new = flat(path, limit: 40000).first(where: { $0.1 == "AXButton" && $0.2 == "New" }) else { return "fail: no New button" }
-            AXUIElementPerformAction(new.0, kAXPressAction as CFString)
-            Thread.sleep(forTimeInterval: 1.5)
+            // right after Bridge or Claude starts, the window's tree is thin for a moment: give the New button up to 4 s to show
+            var newButton: AXUIElement?
+            waitUntil(4.0) { newButton = flat(path, limit: 40000).first(where: { $0.1 == "AXButton" && $0.2 == "New" })?.0; return newButton != nil }
+            guard let newButton else { return "fail: no New button" }
+            AXUIElementPerformAction(newButton, kAXPressAction as CFString)
+            // ready when the old conversation is gone and a message box is drawn
+            waitUntil(2.5) { let f = flat(path, limit: 40000); return !f.contains { $0.1 == "AXHeading" && $0.2.hasPrefix("You said:") } && f.contains { $0.1 == "AXTextArea" } }
         }
         let pre = sendState(path)
         if let l = pre["limit"] as? String, !l.isEmpty { return "limit: \(l)" }
@@ -250,7 +283,7 @@ enum AppProbe {
             return f.last?.0
         }
         var found = findBox()
-        for _ in 0..<8 where found == nil { Thread.sleep(forTimeInterval: 0.5); found = findBox() }
+        if found == nil { waitUntil(4.0) { found = findBox(); return found != nil } }
         guard var box = found else { return "fail: no message box" }
         // A fresh session redraws its composer just after it opens, which can wipe text set too early: find the box again and refill, up to 3 times.
         var filled = 0
@@ -258,12 +291,10 @@ enum AppProbe {
             if attempt > 0 { Thread.sleep(forTimeInterval: 0.8); if let b = findBox() { box = b } }
             AXUIElementSetAttributeValue(box, kAXFocusedAttribute as CFString, kCFBooleanTrue)
             AXUIElementSetAttributeValue(box, kAXValueAttribute as CFString, text as CFString)
-            Thread.sleep(forTimeInterval: 0.5)
-            filled = (attr(box, kAXValueAttribute) as? String ?? "").count
+            waitUntil(0.5) { filled = (attr(box, kAXValueAttribute) as? String ?? "").count; return filled >= max(1, text.count * 8 / 10) }
             if filled < max(1, text.count * 8 / 10) {
                 AXUIElementSetAttributeValue(box, kAXSelectedTextAttribute as CFString, text as CFString)
-                Thread.sleep(forTimeInterval: 0.5)
-                filled = (attr(box, kAXValueAttribute) as? String ?? "").count
+                waitUntil(0.5) { filled = (attr(box, kAXValueAttribute) as? String ?? "").count; return filled >= max(1, text.count * 8 / 10) }
             }
             if filled >= max(1, text.count * 8 / 10) { break }
         }
@@ -273,16 +304,91 @@ enum AppProbe {
         }
         guard let send = (flat(path, limit: 40000).last(where: { $0.1 == "AXButton" && $0.2 == "Send message" })
                           ?? flat(path, limit: 40000).last(where: { $0.1 == "AXButton" && ["Send", "Submit", "Send prompt", "Start"].contains($0.2) }))?.0 else { return "fail: no Send button" }
+        let saidBefore = sendState(path)["you_said"] as? Int ?? 0
         AXUIElementPerformAction(send, kAXPressAction as CFString)
-        Thread.sleep(forTimeInterval: 2.0)
-        let post = sendState(path)
+        // sent only when our message shows as a new "You said:" turn or Claude starts replying. An empty box alone proves nothing:
+        // a redraw or a chat switch empties it too, and that once reported a lost message as sent.
+        var post: [String: Any] = [:]
+        let landed = waitUntil(4.0) {
+            post = sendState(path)
+            return (post["generating"] as? Bool ?? false) || (post["you_said"] as? Int ?? 0) > saidBefore
+        }
         if let l = post["limit"] as? String, !l.isEmpty { return "limit: \(l)" }
-        if (post["composer"] as? Int ?? 0) > 0 && !(post["generating"] as? Bool ?? false) { return "fail: the message stayed in the box" }
+        if !landed {
+            if (post["composer"] as? Int ?? 0) > 0 { return "fail: the message stayed in the box" }
+            return "fail: the message did not show up in the chat (not sent)"
+        }
         return "ok: sent\(picked.isEmpty ? "" : " · " + picked)"
+    }
+
+    /// The exact reply, as Claude's own Copy button gives it (markdown: line breaks, lists, code, no source chips or tool chips).
+    /// Only for the reply that follows OUR message: the last "You said:" in the open chat must carry `marker` ("[Bridge T186").
+    /// The clipboard is saved first and put back exactly as it was (every item, every type), so his own copy is never lost.
+    static func copyReply(_ path: String, marker: String) -> String? {
+        let f = flat(path, limit: 40000)
+        guard let you = f.lastIndex(where: { $0.1 == "AXHeading" && $0.2.hasPrefix("You said:") }), marker.isEmpty || f[you].2.contains(marker) else { return nil }
+        guard let resp = f[(you + 1)...].firstIndex(where: { $0.1 == "AXHeading" && $0.2.hasPrefix("Claude responded:") }),
+              let copy = f[(resp + 1)...].first(where: { $0.1 == "AXButton" && $0.2 == "Copy" }) else { return nil }
+        let pb = NSPasteboard.general
+        let saved: [[(NSPasteboard.PasteboardType, Data)]] = (pb.pasteboardItems ?? []).map { it in it.types.compactMap { t in it.data(forType: t).map { (t, $0) } } }
+        let before = pb.changeCount
+        AXUIElementPerformAction(copy.0, kAXPressAction as CFString)
+        waitUntil(1.5) { pb.changeCount != before }
+        let text = pb.changeCount != before ? pb.string(forType: .string) : nil
+        if pb.changeCount != before {
+            pb.clearContents()
+            if !saved.isEmpty {
+                let items: [NSPasteboardItem] = saved.map { pairs in let it = NSPasteboardItem(); for (t, d) in pairs { it.setData(d, forType: t) }; return it }
+                pb.writeObjects(items)
+            }
+        }
+        return text
+    }
+
+    /// Delete one chat for good, but only after opening it and confirming that every message the owner sent in it matches `pattern`
+    /// (used to clear out Bridge's own test chats). Anything else is left alone. Returns "deleted", "keep: …" or "skip: …".
+    static func deleteChat(_ path: String, title: String, nth: Int, pattern: String) -> String {
+        withWindow(path) {
+            let landed = focusChat(path, title, nth: nth)
+            guard landed == title else { return "skip: could not open (\(landed))" }
+            // the conversation draws a moment after the chat opens: wait for it rather than judging an empty page
+            var read0: [String: Any]?
+            waitUntil(4.0) { read0 = chatRead(path); return (read0?["open"] as? String) == title && ((read0?["turns"] as? [[String: String]])?.isEmpty == false) }
+            guard let got = read0, (got["open"] as? String) == title, (got["generating"] as? Bool) != true,
+                  let turns = got["turns"] as? [[String: String]] else { return "skip: could not read it" }
+            let mine = turns.filter { $0["role"] == "the owner" }
+            guard !mine.isEmpty, mine.allSatisfy({ ($0["text"] ?? "").range(of: pattern, options: .regularExpression) != nil }) else {
+                let odd = mine.first(where: { ($0["text"] ?? "").range(of: pattern, options: .regularExpression) == nil })?["text"] ?? ""
+                return "keep: not a test chat (\(mine.count) of his messages; one starts: \(odd.prefix(70).replacingOccurrences(of: "\n", with: " ")))"
+            }
+            guard let menu = flat(path, limit: 40000).last(where: { $0.1 == "AXPopUpButton" && $0.2 == "More options for " + title })?.0 else { return "skip: no menu" }
+            AXUIElementPerformAction(menu, kAXPressAction as CFString)
+            waitUntil(2.5) { flat(path).contains { $0.1 == "AXMenuItem" && ($0.2 == "Delete" || $0.2.hasPrefix("Delete ")) } }     // the menu fills in over a moment
+            let items = flat(path).filter { $0.1 == "AXMenuItem" }
+            guard let del = items.first(where: { $0.2 == "Delete" || $0.2.hasPrefix("Delete ") })?.0 else {
+                escape(path)
+                return "skip: no Delete in the menu (\(items.map { $0.2 }.joined(separator: ", ")))"
+            }
+            AXUIElementPerformAction(del, kAXPressAction as CFString)
+            var confirm: AXUIElement?
+            waitUntil(2.0) { confirm = flat(path, limit: 40000).last(where: { $0.1 == "AXButton" && ($0.2 == "Delete" || $0.2.hasPrefix("Delete ")) })?.0; return confirm != nil }
+            guard let confirm else {
+                let seen = flat(path, limit: 40000).filter { $0.1 == "AXButton" }.suffix(12).map { $0.2 }.joined(separator: ", ")
+                escape(path)
+                return "skip: no confirm button (\(seen))"
+            }
+            AXUIElementPerformAction(confirm, kAXPressAction as CFString)
+            let gone = waitUntil(3.0) { ((read(path)?["open"] as? String) ?? "") != title }
+            return gone ? "deleted" : "skip: still open after confirming"
+        }
     }
 
     /// Press the permission button the owner picked in Bridge Chat: open its chat if named, then press the last button with exactly that title.
     static func pressButton(_ path: String, chat: String, title: String) -> String {
+        withWindow(path) { pressButtonLocked(path, chat: chat, title: title) }
+    }
+
+    private static func pressButtonLocked(_ path: String, chat: String, title: String) -> String {
         guard root(path) != nil else { return "fail: no access to the Claude window" }
         if !chat.isEmpty, (read(path)?["open"] as? String ?? "") != chat {
             let got = focusChat(path, chat)
@@ -294,9 +400,9 @@ enum AppProbe {
     }
 
     /// Click the sidebar chat with this title, so a message lands in that exact chat. Returns the open chat's title afterwards.
-    static func focusChat(_ path: String, _ title: String) -> String {
+    static func focusChat(_ path: String, _ title: String, nth: Int = 0) -> String {
         guard let r = root(path) else { return "no access" }
-        var target: AXUIElement?, count = 0
+        var target: AXUIElement?, count = 0, seen = 0
         let names = [kAXRoleAttribute, kAXTitleAttribute, kAXChildrenAttribute] as CFArray
         func walk(_ e: AXUIElement, _ d: Int) {
             if target != nil || count > 40000 || d > 90 { return }
@@ -304,66 +410,187 @@ enum AppProbe {
             var vals: CFArray?
             guard AXUIElementCopyMultipleAttributeValues(e, names, [], &vals) == .success, let v = vals as? [AnyObject], v.count == 3 else { return }
             let role = v[0] as? String ?? "", t = v[1] as? String ?? ""
-            if (role == "AXButton" || role == "AXLink") && (t == title || t == title + " Running") { target = e; return }
+            // a sidebar row reads "<title> Running" while Claude works and "<title> Unread response" once a reply lands in a chat that is not open
+            if (role == "AXButton" || role == "AXLink") && (t == title || t == title + " Running" || t == title + " Unread response") { if seen == nth { target = e; return }; seen += 1 }
             for k in (v[2] as? [AXUIElement]) ?? [] { walk(k, d + 1) }
         }
         for w in (attr(r, kAXWindowsAttribute) as? [AXUIElement]) ?? [] { walk(w, 0) }
         guard let t = target else { return "not found" }
         AXUIElementPerformAction(t, kAXPressAction as CFString)
-        Thread.sleep(forTimeInterval: 1.2)
-        return (read(path)?["open"] as? String) ?? ""
+        var got = ""
+        let unnamed = title == "New chat" || title == "Untitled"
+        waitUntil(unnamed ? 0.9 : 2.0) { got = (read(path)?["open"] as? String) ?? ""; return got == title }      // was a fixed 1.2 s
+        return got
     }
 
     /// Everything the window shows: the open chat's conversation (in order), whether it is replying, the sessions marked Running,
     /// the recent chats in the sidebar, the current step and the model. Stays on this Mac (local database only).
     static func chatRead(_ path: String, maxChars: Int = 60000) -> [String: Any]? {
         guard let r = root(path) else { return nil }
-        var items: [(String, String)] = []     // (role, text) in tree order
+        var items: [(String, String, Int)] = []     // (role, text, parent element) in tree order; "bt" = text inside a button
+        var markers: [Int] = []
+        var tops: [Int: (Double, Double)] = [:]      // item index -> (top, bottom) on screen, for static text: a run that starts below the last one is a new line
         var count = 0
         let names = [kAXRoleAttribute, kAXTitleAttribute, kAXValueAttribute, kAXChildrenAttribute] as CFArray
-        func walk(_ e: AXUIElement, _ d: Int) {
+        let geo = [kAXPositionAttribute, kAXSizeAttribute] as CFArray
+        // a source chip (a link reading "trulia", "apartmentfinder" or "Some page title +2") is not part of the answer
+        func chipCount(_ t: String) -> Bool { t.trimmingCharacters(in: .whitespaces).range(of: #"\s\+\d+$"#, options: .regularExpression) != nil }
+        func siteWord(_ t: String) -> Bool { t.trimmingCharacters(in: .whitespaces).range(of: #"^[a-z0-9][a-z0-9.\-]{1,40}$"#, options: .regularExpression) != nil }
+        func walk(_ e: AXUIElement, _ d: Int, _ parent: Int, _ inButton: Bool, _ inLink: Bool = false) {
             if count > 20000 || d > 90 { return }
             count += 1
             var vals: CFArray?
             guard AXUIElementCopyMultipleAttributeValues(e, names, [], &vals) == .success, let v = vals as? [AnyObject], v.count == 4 else { return }
             let role = v[0] as? String ?? "", title = v[1] as? String ?? "", value = v[2] as? String ?? ""
             switch role {
-            case "AXStaticText": if !value.isEmpty { items.append(("t", value)) }
-            case "AXHeading": items.append(("h", title))
-            case "AXButton": items.append(("b", title))
-            case "AXPopUpButton": items.append(("p", title))
+            case "AXListMarker":     // "1." / "•": Chromium draws list numbers as their own element, not as text
+                let mk = (value.isEmpty ? title : value).trimmingCharacters(in: .whitespaces)
+                if !mk.isEmpty { markers.append(items.count); items.append(("m", mk, parent)) }
+            case "AXStaticText":
+                if !value.isEmpty, !(inLink && chipCount(value)) {
+                    var gv: CFArray?, pt = CGPoint.zero, sz = CGSize.zero      // geometry for text only: asking every node made each read slower
+                    if AXUIElementCopyMultipleAttributeValues(e, geo, [], &gv) == .success, let g = gv as? [AnyObject], g.count == 2 {
+                        if CFGetTypeID(g[0]) == AXValueGetTypeID() { AXValueGetValue(g[0] as! AXValue, .cgPoint, &pt) }
+                        if CFGetTypeID(g[1]) == AXValueGetTypeID() { AXValueGetValue(g[1] as! AXValue, .cgSize, &sz) }
+                    }
+                    if sz.height > 0 { tops[items.count] = (Double(pt.y), Double(pt.y + sz.height)) }
+                    items.append((inButton ? "bt" : (inLink && siteWord(value) ? "lt" : "t"), value, parent))
+                }
+            case "AXHeading": items.append(("h", title, parent))
+            case "AXLink": items.append(("l", title, parent))
+            case "AXToolbar": items.append(("x", title, parent))        // "Message actions": the end of a reply
+            case "AXGroup": if title == "Currently streaming message" { items.append(("s", title, parent)) }     // the reply while Claude is still writing it
+            case "AXRow": items.append(("row", "", parent))
+            case "AXCell": items.append(("cell", "", parent))
+            case "AXButton": items.append(("b", title, parent))
+            case "AXPopUpButton": items.append(("p", title, parent))
             default: break
             }
-            for k in (v[3] as? [AXUIElement]) ?? [] { walk(k, d + 1) }
+            let me = Int(bitPattern: UInt(CFHash(e)))
+            for k in (v[3] as? [AXUIElement]) ?? [] { walk(k, d + 1, me, inButton || role == "AXButton", inLink || role == "AXLink") }
+            if role == "AXGroup" && title == "Currently streaming message" { items.append(("se", "", parent)) }     // the end of the reply being written
         }
         let wins = (attr(r, kAXWindowsAttribute) as? [AXUIElement]) ?? []
-        for w in wins { walk(w, 0) }
-        var running: [String] = [], more: [String] = [], buttons = Set<String>(), generating = false, step = "", model = ""
-        for (k, t) in items {
+        for w in wins { walk(w, 0, 0, false) }
+        var running: [String] = [], unread: [String] = [], more: [String] = [], buttons = Set<String>(), generating = false, step = "", model = ""
+        var thinking = ""        // Claude's own status line while it works ("Drafting five paragraphs on how glaciers move")
+        for (k, t, _) in items {
             if k == "b" {
                 buttons.insert(t)
                 if t == "Stop response" { generating = true }
                 else if t.hasSuffix(" Running") { running.append(String(t.dropLast(8))) }
+                else if t.hasSuffix(" Unread response") { unread.append(String(t.dropLast(16))) }     // a finished reply in a chat that is not open
                 else if t.hasPrefix("Using ") { step = t }
+                else if t.hasSuffix(" running") { thinking = String(t.dropLast(8)) }
             } else if k == "p" {
                 if t.hasPrefix("More options for ") { more.append(String(t.dropFirst(17))) }
+                else if t == "More options" { more.append("Untitled") }      // a chat Claude has not named yet: its row reads "Untitled", its menu just "More options"
                 else if t.hasPrefix("Model: ") { model = String(t.dropFirst(7)) }
             }
         }
-        var open = ""
-        if let last = more.last, more.filter({ $0 == last }).count >= 2 { open = last }
+        // The open chat is the one whose header carries a "<title>, rename session" button (two chats can share a title, so counting
+        // titles is not enough). Sidebar group headings (Pinned, a project, Recents) are not chats.
+        var open = "", groups = Set<String>(), inSidebar = true
+        for (k, t, _) in items {
+            if k == "b", t.hasSuffix(", rename session") { open = String(t.dropLast(16)); inSidebar = false }
+            else if k == "h" {
+                if t.hasPrefix("You said:") || t.hasPrefix("Claude responded:") { inSidebar = false }
+                else if inSidebar { groups.insert(t.replacingOccurrences(of: " Unread response", with: "").replacingOccurrences(of: " Running", with: "")) }
+            }
+        }
+        groups.remove(open)
+        if open == "Untitled" { open = "" }
+        running = running.filter { !groups.contains($0) }
+        unread = unread.filter { !groups.contains($0) }
         var recents: [String] = []
-        for m in more where (buttons.contains(m) || buttons.contains(m + " Running")) && !recents.contains(m) && m != open { recents.append(m) }
-        // the conversation: turns start at headings "You said: …" / "Claude responded: …"
+        for m in more where (buttons.contains(m) || buttons.contains(m + " Running") || buttons.contains(m + " Unread response")) && !recents.contains(m) && m != open && !groups.contains(m) { recents.append(m) }
+        // The conversation, exactly as written. Turns start at headings "You said: …" / "Claude responded: …"; a reply ends at its
+        // "Message actions" toolbar, so timestamps, the composer and the footer never get into it. Text runs keep their own spaces
+        // (Chromium exposes them verbatim), so runs on one line are joined with nothing added; line breaks come from the screen.
         var turns: [[String: String]] = []
         var cur: [String: String]? = nil
-        func flush() { if let c = cur, !(c["text"] ?? "").isEmpty { turns.append(c) }; cur = nil }
-        for (k, t) in items {
+        var lastParent = -1, lastBottom = -1.0, lastCtl = ("", "")     // the last button/link/heading seen: its label text follows it
+        var lead = "", answerFound = true, markerAt = -1, cellPending = false, streaming = false
+        func norm(_ x: String) -> String {
+            x.replacingOccurrences(of: "\u{2019}", with: "'").replacingOccurrences(of: "\u{2018}", with: "'").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        func flush() {
+            if let c = cur, !(c["text"] ?? "").isEmpty { turns.append(c) }
+            cur = nil; lastParent = -1; lastBottom = -1; lead = ""; answerFound = true; markerAt = -1; cellPending = false; streaming = false
+        }
+        for (idx, (k, t, par)) in items.enumerated() {
+            if k == "x" { if t == "Message actions" { flush() }; continue }
+            // a reply still being written: marked "live" so the engine never takes it for a finished answer, and closed where its own
+            // group ends, so the composer and footer after it never get in
+            if k == "s" { flush(); cur = ["role": "Claude", "text": "", "live": "1"]; streaming = true; continue }
+            if k == "se" { flush(); continue }
+            // while Claude is still writing, its status words sit where the reply will be: they are not the reply
+            if streaming, k == "t" || k == "bt", ["running", "Claude is thinking", "Claude is responding", thinking].contains(t.trimmingCharacters(in: .whitespaces)) { continue }
+            if k == "row" {
+                if cur != nil, let txt = cur?["text"], !txt.isEmpty, !txt.hasSuffix("\n") { cur!["text"]! += "\n" }
+                cellPending = false; lastParent = -2; lastBottom = -1
+                continue
+            }
+            if k == "cell" { cellPending = true; continue }
+            if k == "m", cur != nil {
+                let txt = cur!["text"]!
+                if !txt.isEmpty && !txt.hasSuffix("\n") { cur!["text"]! += "\n" }
+                markerAt = cur!["text"]!.count
+                cur!["text"]! += (t == "•" || t == "◦" || t == "▪" ? "-" : t) + " "
+                lastParent = -2; lastBottom = -1
+                continue
+            }
+            if k == "b" || k == "l" { lastCtl = (k, t) }
+            // a text that only repeats the control just before it is that control's label: a status chip ("Searched the web"),
+            // a source chip ("trulia", "Page title +2"), or a heading's own text
+            if (k == "t" || k == "lt"), !lastCtl.1.isEmpty,
+               t.trimmingCharacters(in: .whitespaces) == lastCtl.1.trimmingCharacters(in: .whitespaces) || lastCtl.1 == t + " running",     // "<thinking status> running"
+               lastCtl.0 == "b" || lastCtl.0 == "h" || siteWord(t) || chipCount(t) { lastCtl = ("", ""); continue }
+            if k == "t" || k == "lt" { lastCtl = ("", "") }
             if k == "h" && t.hasPrefix("You said:") { flush(); cur = ["role": "the owner", "text": ""] }
-            else if k == "h" && t.hasPrefix("Claude responded:") { flush(); cur = ["role": "Claude", "text": ""] }
-            else if k == "h", cur != nil, !t.isEmpty, !t.hasPrefix("More options") { cur!["text"]! += "\n## " + t + "\n" }
-            else if k == "t", cur != nil { cur!["text"]! += (cur!["text"]!.isEmpty || cur!["text"]!.hasSuffix("\n") ? "" : " ") + t }
-            else if k == "b", cur != nil, t.hasPrefix("Used ") || t.hasPrefix("Using ") { cur!["text"]! += "\n[" + t + "]\n" }
+            else if k == "h" && t.hasPrefix("Claude responded:") {
+                flush(); cur = ["role": "Claude", "text": ""]
+                // the heading carries how the answer starts; anything shown before that (a thinking summary, tool chips) is not the answer
+                lead = norm(String(t.dropFirst("Claude responded:".count))); answerFound = lead.isEmpty
+            }
+            else if k == "h", cur != nil, !t.isEmpty, !t.hasPrefix("More options") {
+                if !answerFound, !norm(t).isEmpty, lead.hasPrefix(norm(t)) || norm(t).hasPrefix(lead) { cur!["text"] = ""; answerFound = true }
+                let txt = cur!["text"]!
+                cur!["text"]! += (txt.isEmpty ? "" : (txt.hasSuffix("\n\n") ? "" : (txt.hasSuffix("\n") ? "\n" : "\n\n"))) + "## " + t + "\n"
+                lastCtl = ("h", t); lastParent = -2; lastBottom = -1
+            }
+            else if k == "t" || k == "lt", cur != nil, !t.hasPrefix("Claude responded:"), !t.hasPrefix("You said:") {
+                if !answerFound {
+                    let n = norm(t)
+                    if !n.isEmpty, lead.hasPrefix(n) || n.hasPrefix(lead) {
+                        let txt = cur!["text"]!
+                        let keepMarker = markerAt >= 0 && txt.count - markerAt <= 6          // "1. " written just before this text
+                        cur!["text"] = keepMarker ? String(txt.dropFirst(markerAt)) : ""
+                        answerFound = true; lastBottom = -1; lastParent = keepMarker ? -2 : -1
+                    }
+                }
+                let txt = cur!["text"]!
+                let below = lastParent == -2 ? false : (tops[idx].map { lastBottom > 0 && $0.0 >= lastBottom - 2 } ?? (par != lastParent))
+                if k == "lt" && (below || txt.hasSuffix("\n") || txt.isEmpty) { continue }    // a one-word source chip on its own line ("trulia"), not an inline link
+                var sep = ""
+                if txt.isEmpty || txt.hasSuffix("\n") || lastParent == -2 { sep = "" }
+                else if cellPending { sep = " | " }
+                else if below {
+                    // a run that continues a sentence carries the space itself ("…text " + bold): no break. Otherwise the screen broke the line:
+                    // the same element means a soft break, another element a new block (a blank line when the gap is a paragraph's).
+                    let inline = txt.hasSuffix(" ") || t.hasPrefix(" ")
+                    let gap = tops[idx].map { $0.0 - lastBottom } ?? 0
+                    sep = inline ? "" : (par == lastParent ? "\n" : (gap > 9 ? "\n\n" : "\n"))
+                }
+                cellPending = false
+                cur!["text"]! += sep + t
+                lastParent = par
+                if let tb = tops[idx] { lastBottom = tb.1 }
+            }
+            else if k == "b", cur != nil, t.hasPrefix("Used ") || t.hasPrefix("Using ") {
+                let txt = cur!["text"]!
+                cur!["text"]! += (txt.isEmpty || txt.hasSuffix("\n") ? "" : "\n") + "[" + t + "]\n"
+            }
         }
         flush()
         var total = 0, keep: [[String: String]] = []
@@ -388,7 +615,7 @@ enum AppProbe {
         if step.hasSuffix(" running") { step = String(step.dropLast(8)) }
         if let c = step.range(of: ": "), step.count > 80 { step = String(step[..<c.lowerBound]) }
         return ["window": count > 40, "open": open, "running": running, "generating": generating, "step": String(step.prefix(90)),
-                "model": model, "recents": Array(recents.prefix(15)), "turns": keep, "turn_count": turns.count, "permission": permission ?? NSNull()]
+                "model": model, "thinking": generating ? thinking : "", "recents": Array(recents.prefix(60)), "unread": unread.filter { more.contains($0) }, "turns": keep, "turn_count": turns.count, "permission": permission ?? NSNull()]
     }
 
     /// chatRead, with one more try when the tree came back empty: the first read after a Claude window starts (or after Bridge
@@ -416,7 +643,7 @@ enum AppProbe {
                 guard AXUIElementCopyMultipleAttributeValues(e, names, [], &vals) == .success, let v = vals as? [AnyObject], v.count == 4 else { return }
                 let role = v[0] as? String ?? "", title = v[1] as? String ?? "", value = v[2] as? String ?? ""
                 switch role {
-                case "AXTextArea": composer = max(composer, value.trimmingCharacters(in: .whitespacesAndNewlines).count)
+                case "AXTextArea": composer = max(composer, value.trimmingCharacters(in: invisibleSet).count)
                 case "AXStaticText": if limit.isEmpty, value.hasPrefix("Usage limit reached") { limit = String(value.prefix(120)) }
                 case "AXButton": if title == "Stop response" { generating = true }
                 case "AXHeading": if title.hasPrefix("You said:") { youSaid += 1 }

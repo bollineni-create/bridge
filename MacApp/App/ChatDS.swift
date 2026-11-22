@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import AVFoundation
 
 // Bridge Chat: the main way to drive every runner. One box; Bridge routes each message (or splits it), lets you pick the
 // Claude model and effort, sends each part to the right runner, and brings every answer back here. Engine: bridge_convo.py.
@@ -28,6 +29,7 @@ struct ConvoMsg: Decodable, Identifiable, Equatable {
     var turn: Int?
     var state: String
     var options: [String]? = nil     // kind "permission": the card's buttons, in Claude's order
+    var rating: String? = nil        // "up" | "down" | "": the thumbs under a reply
 }
 
 struct ConvoStep: Decodable, Identifiable, Equatable {
@@ -45,6 +47,8 @@ struct ConvoStep: Decodable, Identifiable, Equatable {
     var chat: String
     var progress: String
     var split: Bool
+    var partial: String? = nil       // the reply so far, while the runner is still writing it
+    var thinking: String? = nil      // Claude's own status line while it works
 }
 
 struct ConvoOptions: Decodable {
@@ -127,12 +131,12 @@ struct ChatDSView: View {
     var threadList: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button { selected = nil; who = "auto"; model = ""; effort = ""; typing = true } label: {
-                HStack { Image(systemName: "square.and.pencil"); Text("New chat").font(SW.a(14, 600)); Spacer(); Text("⌘N").font(SW.a(11, 500)).foregroundStyle(DS.label3) }
-                    .padding(.horizontal, 12).frame(height: 36).overlay(Rectangle().strokeBorder(DS.rule, lineWidth: 2)).contentShape(Rectangle())
+                HStack(spacing: 8) { Image(systemName: "plus.circle.fill").font(SW.a(15, 500)); Text("New chat").font(SW.a(14, 500)); Spacer(); Text("⌘N").font(SW.a(11, 500)).foregroundStyle(DS.label3) }
+                    .padding(.horizontal, 10).frame(height: 34).background(selected == nil ? DS.fill : Color.clear).clipShape(RoundedRectangle(cornerRadius: 8)).contentShape(Rectangle())
             }
             .buttonStyle(.plain).keyboardShortcut("n", modifiers: .command)
             RunnerStrip()
-            DS.caps("Chats").padding(.top, 6)
+            Text("Recents").font(SW.a(12, 500)).foregroundStyle(DS.label3).padding(.top, 6).padding(.leading, 8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(convos) { c in
@@ -140,13 +144,14 @@ struct ChatDSView: View {
                             HStack(spacing: 8) {
                                 statusMark(c)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(c.title).font(SW.a(13.5, selected == c.id ? 600 : 400)).lineLimit(1)
+                                    Text(c.chat.isEmpty ? c.title : c.chat).font(SW.a(13.5, selected == c.id ? 600 : 400)).lineLimit(1)      // the short name Claude gave the chat, when there is one
                                     Text(sub(c)).font(SW.a(11.5, 400)).foregroundStyle(DS.label3).lineLimit(1)
                                 }
                                 Spacer(minLength: 0)
                             }
                             .padding(.horizontal, 8).padding(.vertical, 7)
                             .background(selected == c.id ? DS.fill : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -180,7 +185,17 @@ struct ChatDSView: View {
     var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(current?.title ?? "New chat").font(SW.heading(22)).lineLimit(1)
+                if let c = current {
+                    Menu {
+                        Button("Stop all parts") { store.cli(["convo", "stop", "C\(c.id)"], quiet: true) }.disabled(c.status != "working")
+                        Button("Delete chat", role: .destructive) { selected = nil; store.cli(["convo", "delete", "C\(c.id)"], quiet: true) }
+                    } label: {
+                        HStack(spacing: 6) { Text(c.chat.isEmpty ? c.title : c.chat).font(SW.a(16, 600)).lineLimit(1); Image(systemName: "chevron.down").font(SW.a(10, 700)).foregroundStyle(DS.label3) }
+                    }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                } else {
+                    Text("New chat").font(SW.a(16, 600))
+                }
                 Text(headerSub).font(SW.a(12.5, 400)).foregroundStyle(DS.label2).lineLimit(1)
             }
             Spacer()
@@ -213,22 +228,30 @@ struct ChatDSView: View {
     var conversation: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: 22) {
                     if let c = current {
                         ForEach(c.msgs) { m in
-                            MsgView(m: m, steps: c.steps.filter { $0.turn == m.turn }).id(m.id)
+                            MsgView(m: m, steps: c.steps.filter { $0.turn == m.turn }, isLast: m.id == c.msgs.last?.id && c.status != "working",
+                                    onEdit: { draft = $0; typing = true },
+                                    onResend: { t in store.cli(["convo", "send", "C\(c.id)", t, "--who", who], quiet: true) }).id(m.id)
                         }
                     } else if pending.isEmpty {
                         empty
                     }
                     ForEach(pending, id: \.self) { p in MsgView(m: ConvoMsg(id: -1, ts: nil, role: "user", runner: "", kind: "text", text: p, task: nil, turn: nil, state: "sending"), steps: []) }
-                    if let c = current, c.status == "working", c.msgs.last?.role == "user" || c.msgs.last?.kind == "plan" {
-                        HStack(spacing: 8) { ProgressView().controlSize(.small); Text(workingLine(c)).font(SW.a(12.5, 400)).foregroundStyle(DS.label2) }
+                    if let c = current, c.status == "working" {
+                        // the reply as it is being written, the way Claude shows it; before the first words, who has it
+                        let writing = c.steps.filter { !($0.partial ?? "").isEmpty && ["queued", "working"].contains($0.status) }
+                        ForEach(writing) { s in StreamingView(step: s) }
+                        if writing.isEmpty, c.msgs.last?.role == "user" || c.msgs.last?.kind == "plan" {
+                            HStack(spacing: 8) { ProgressView().controlSize(.small); Text(workingLine(c)).font(SW.a(12.5, 400)).foregroundStyle(DS.label2) }
+                        }
                     }
                     Color.clear.frame(height: 1).id("end")
                 }
-                .padding(.horizontal, 24).padding(.vertical, 16).frame(maxWidth: 900).frame(maxWidth: .infinity)
+                .padding(.horizontal, 24).padding(.vertical, 16).frame(maxWidth: 780).frame(maxWidth: .infinity)
             }
+            .onChange(of: current?.steps.map { ($0.partial ?? "").count }) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
             .onChange(of: current?.msgs.last?.id) { _, _ in withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("end", anchor: .bottom) } }
             .onChange(of: pending.count) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
             .onChange(of: selected) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
@@ -238,7 +261,10 @@ struct ChatDSView: View {
     func workingLine(_ c: Convo) -> String {
         let live = c.steps.filter { ["pending", "queued", "working"].contains($0.status) }
         if live.isEmpty { return "Bridge is working out who should take this…" }
-        return live.map { "\(DS.name($0.runner)) \($0.status == "working" ? "is on it" : "has it queued")" }.joined(separator: " · ")
+        return live.map { s in
+            if s.status == "working", let t = s.thinking, !t.isEmpty { return "\(DS.name(s.runner)): \(t)\u{2026}" }
+            return "\(DS.name(s.runner)) \(s.status == "working" ? "is on it" : "has it queued")"
+        }.joined(separator: " · ")
     }
 
     var empty: some View {
@@ -260,12 +286,9 @@ struct ChatDSView: View {
 
     // MARK: composer
     var composer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let c = current, !c.runner.isEmpty, who == "auto" {
-                Text(followHint(c)).font(SW.a(11.5, 400)).foregroundStyle(DS.label3)
-            }
+        VStack(alignment: .center, spacing: 8) {
             VStack(spacing: 0) {
-                TextField(current == nil ? "Message all your runners" : "Reply", text: $draft, axis: .vertical)
+                TextField(current == nil ? "How can Bridge help?" : "Reply…", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain).font(SW.a(15, 400)).lineLimit(1...10).focused($typing)
                     .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 8)
                     .onSubmit(send)
@@ -289,19 +312,30 @@ struct ChatDSView: View {
                         }
                     }
                     Spacer()
-                    Button(action: send) {
-                        Image(systemName: sending ? "hourglass" : "arrow.up").font(SW.a(15, 700)).foregroundStyle(DS.onRunner)
-                            .frame(width: 34, height: 34).background(draft.trimmingCharacters(in: .whitespaces).isEmpty ? DS.label3 : DS.accent)
+                    if let c = current, c.status == "working", draft.trimmingCharacters(in: .whitespaces).isEmpty {
+                        // while a reply is being written the send button is a stop button
+                        Button { store.cli(["convo", "stop", "C\(c.id)"], quiet: true) } label: {
+                            Image(systemName: "stop.fill").font(SW.a(12, 700)).foregroundStyle(DS.onRunner).frame(width: 32, height: 32).background(DS.accent).clipShape(Circle())
+                        }
+                        .buttonStyle(.plain).help("Stop")
+                    } else {
+                        Button(action: send) {
+                            Image(systemName: sending ? "hourglass" : "arrow.up").font(SW.a(14, 700)).foregroundStyle(DS.onRunner)
+                                .frame(width: 32, height: 32).background(draft.trimmingCharacters(in: .whitespaces).isEmpty ? DS.label3.opacity(0.5) : DS.accent).clipShape(Circle())
+                        }
+                        .buttonStyle(.plain).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || sending)
+                        .keyboardShortcut(.return, modifiers: .command)
                     }
-                    .buttonStyle(.plain).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || sending)
-                    .keyboardShortcut(.return, modifiers: .command)
                 }
                 .padding(.horizontal, 10).padding(.bottom, 10)
             }
             .background(DS.raised)
-            .overlay(Rectangle().strokeBorder(DS.rule.opacity(0.6), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(DS.separator.opacity(0.35), lineWidth: 1))
+            Text(current.flatMap { c in !c.runner.isEmpty && who == "auto" ? followHint(c) : nil } ?? "Bridge routes each message to Ultra, Pro or Qwen. Replies can contain mistakes.")
+                .font(SW.a(11, 400)).foregroundStyle(DS.label3).lineLimit(1)
         }
-        .padding(.horizontal, 24).padding(.bottom, 18).padding(.top, 6).frame(maxWidth: 900).frame(maxWidth: .infinity)
+        .padding(.horizontal, 24).padding(.bottom, 12).padding(.top, 6).frame(maxWidth: 780).frame(maxWidth: .infinity)
     }
 
     var whoLabel: String {
@@ -321,7 +355,7 @@ struct ChatDSView: View {
     func picker<Content: View>(label: String, icon: String, @ViewBuilder _ items: () -> Content) -> some View {
         Menu { items() } label: {
             HStack(spacing: 5) { Image(systemName: icon).font(SW.a(11, 500)); Text(label).font(SW.a(12.5, 600)); Image(systemName: "chevron.down").font(SW.a(9, 700)) }
-                .padding(.horizontal, 9).frame(height: 28).background(DS.fill)
+                .padding(.horizontal, 9).frame(height: 28).background(DS.fill).clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
     }
@@ -330,18 +364,49 @@ struct ChatDSView: View {
 // MARK: one message
 struct MsgView: View {
     @EnvironmentObject var store: Store
+    @ObservedObject var speaker = Speaker.shared
     var m: ConvoMsg
     var steps: [ConvoStep]
-    @State private var expanded = false
+    var isLast = false
+    var onEdit: (String) -> Void = { _ in }
+    var onResend: (String) -> Void = { _ in }
+    @State private var hover = false
+    @State private var copied = false
+    @State private var myRating: String? = nil
+
+    var rating: String { myRating ?? m.rating ?? "" }
+
+    func copy() {
+        copyText(m.text)
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+    }
+
+    func rate(_ v: String) {
+        let new = rating == v ? "none" : v
+        myRating = new == "none" ? "" : new
+        store.cli(["convo", "rate", "M\(m.id)", new], quiet: true)
+    }
 
     var body: some View {
         switch m.role {
         case "user":
-            HStack {
-                Spacer(minLength: 120)
-                Text(md(m.text)).font(SW.a(14.5, 400)).foregroundStyle(DS.onRunner).textSelection(.enabled)
-                    .padding(.horizontal, 14).padding(.vertical, 10).background(DS.accent.opacity(m.state == "sending" ? 0.55 : 1))
+            // your message: a soft bubble on the right; Retry, Edit and Copy appear under it on hover
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(md(m.text)).font(SW.a(15, 400)).lineSpacing(3).foregroundStyle(DS.label).textSelection(.enabled)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(DS.fill.opacity(m.state == "sending" ? 0.6 : 1)).clipShape(RoundedRectangle(cornerRadius: 16))
+                if m.id >= 0 {
+                    HStack(spacing: 2) {
+                        ActionIcon("arrow.counterclockwise", "Retry") { onResend(m.text) }
+                        ActionIcon("pencil", "Edit") { onEdit(m.text) }
+                        ActionIcon(copied ? "checkmark" : "doc.on.doc", "Copy") { copy() }
+                    }
+                    .opacity(hover ? 1 : 0)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .trailing).padding(.leading, 100)
+            .contentShape(Rectangle()).onHover { hover = $0 }
         case "bridge" where m.kind == "plan":
             PlanView(text: m.text, steps: steps)
         case "runner" where m.kind == "permission":
@@ -349,40 +414,234 @@ struct MsgView: View {
         case "bridge" where m.kind == "status":
             Text(m.text).font(SW.a(12, 400)).foregroundStyle(DS.label3)
         default:
-            VStack(alignment: .leading, spacing: 6) {
+            // a reply: plain text on the page, who wrote it above, and the action row under it (Copy, Read aloud, thumbs, Retry)
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
-                    Text(m.role == "bridge" ? (m.kind == "summary" ? "REPORT" : "BRIDGE") : DS.code(m.runner)).font(SW.a(10.5, 800)).tracking(0.6)
-                        .foregroundStyle(DS.onRunner).padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(m.role == "bridge" ? DS.solid : DS.runner(m.runner))
-                    Text(caption).font(SW.a(11.5, 500)).foregroundStyle(DS.label3)
-                    Spacer()
-                    Button { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(m.text, forType: .string) } label: { Image(systemName: "doc.on.doc").font(SW.a(11, 500)) }
-                        .buttonStyle(.plain).foregroundStyle(DS.label3).help("Copy")
+                    Circle().fill(m.kind == "question" ? SW.red : (m.role == "bridge" ? DS.label3 : DS.runner(m.runner))).frame(width: 7, height: 7)
+                    Text(m.role == "bridge" ? (m.kind == "summary" ? "Report" : "Bridge") : DS.name(m.runner)).font(SW.a(12, 600)).foregroundStyle(DS.label2)
+                    Text(caption).font(SW.a(11.5, 400)).foregroundStyle(DS.label3)
                 }
-                Text(md(shown)).font(SW.a(14.5, 400)).foregroundStyle(m.kind == "error" ? DS.critical : DS.label).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                if long {
-                    Button(expanded ? "Show less" : "Show all") { expanded.toggle() }.buttonStyle(.plain).font(SW.a(12, 600)).foregroundStyle(DS.label2)
+                MDView(text: m.text, color: m.kind == "error" ? DS.critical : DS.label)
+                HStack(spacing: 2) {
+                    ActionIcon(copied ? "checkmark" : "doc.on.doc", "Copy") { copy() }
+                    ActionIcon(speaker.speaking == m.id ? "stop.circle" : "speaker.wave.2", speaker.speaking == m.id ? "Stop reading" : "Read aloud") { speaker.toggle(m.id, m.text) }
+                    ActionIcon(rating == "up" ? "hand.thumbsup.fill" : "hand.thumbsup", "Good response") { rate("up") }
+                    ActionIcon(rating == "down" ? "hand.thumbsdown.fill" : "hand.thumbsdown", "Bad response") { rate("down") }
+                    if m.role == "runner", m.turn != nil {
+                        ActionIcon("arrow.triangle.2.circlepath", "Retry") { store.cli(["convo", "retry", "M\(m.id)"], quiet: true) }
+                    }
                 }
+                .padding(.leading, -6)
+                .opacity(isLast || hover || !rating.isEmpty || speaker.speaking == m.id ? 1 : 0)
             }
-            .padding(.leading, 12)
-            .overlay(alignment: .leading) { Rectangle().fill(m.kind == "question" ? SW.red : (m.role == "bridge" ? DS.label3 : DS.runner(m.runner))).frame(width: 3) }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle()).onHover { hover = $0 }
         }
     }
 
-    var long: Bool { m.text.count > 2400 }
-    var shown: String { long && !expanded ? String(m.text.prefix(2400)) + "…" : m.text }
     var caption: String {
         var bits: [String] = []
         switch m.kind {
         case "question": bits.append("is asking you · reply below")
         case "summary": bits.append("everything that came back")
         case "error": bits.append("problem")
-        default: if m.role == "runner" { bits.append(DS.name(m.runner)) }
+        default: break
         }
         if let t = m.task { bits.append("T\(t)") }
         if let ts = m.ts { bits.append(clock(ts, "h:mm a")) }
         return bits.joined(separator: " · ")
+    }
+}
+
+/// One quiet icon in a message's action row.
+struct ActionIcon: View {
+    var icon: String
+    var tip: String
+    var action: () -> Void
+    @State private var hot = false
+    init(_ icon: String, _ tip: String, _ action: @escaping () -> Void) { self.icon = icon; self.tip = tip; self.action = action }
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 13, weight: .regular)).foregroundStyle(hot ? DS.label : DS.label3)
+                .frame(width: 28, height: 26).background(hot ? DS.fill : Color.clear).clipShape(RoundedRectangle(cornerRadius: 6)).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).help(tip).onHover { hot = $0 }
+    }
+}
+
+/// A reply while it is still being written.
+struct StreamingView: View {
+    var step: ConvoStep
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                LiveDot(color: DS.runner(step.runner), pulse: true).frame(width: 10)
+                Text("\(DS.name(step.runner)) is writing").font(SW.a(12, 600)).foregroundStyle(DS.label2)
+            }
+            MDView(text: step.partial ?? "")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private func copyText(_ s: String) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(s, forType: .string)
+}
+
+/// Read aloud: one voice for the whole app; tapping again stops it.
+final class Speaker: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
+    static let shared = Speaker()
+    @Published var speaking: Int? = nil
+    private let synth = AVSpeechSynthesizer()
+    override init() { super.init(); synth.delegate = self }
+    func toggle(_ id: Int, _ text: String) {
+        let was = speaking
+        synth.stopSpeaking(at: .immediate)
+        speaking = nil
+        if was == id { return }
+        let plain = text.replacingOccurrences(of: #"[*_`#>|]"#, with: "", options: .regularExpression)
+        synth.speak(AVSpeechUtterance(string: plain))
+        speaking = id
+    }
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        DispatchQueue.main.async { if !self.synth.isSpeaking { self.speaking = nil } }
+    }
+}
+
+// MARK: markdown blocks: headings, lists, code, quotes and tables, laid out the way a chat reply reads
+struct MDView: View {
+    var text: String
+    var size: CGFloat = 15
+    var color: Color = DS.label
+
+    enum Block {
+        case para(String), heading(Int, String), item(Int, String, String), code(String, String), quote(String), rule, table([[String]])
+    }
+
+    static func parse(_ text: String) -> [Block] {
+        var out: [Block] = []
+        var para: [String] = []
+        var table: [[String]] = []
+        func flushPara() { if !para.isEmpty { out.append(.para(para.joined(separator: "\n"))); para = [] } }
+        func flushTable() { if !table.isEmpty { out.append(.table(table)); table = [] } }
+        let lines = text.components(separatedBy: "\n")
+        var i = 0
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") {
+                flushPara(); flushTable()
+                let lang = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                var body: [String] = []
+                i += 1
+                while i < lines.count, !lines[i].trimmingCharacters(in: .whitespaces).hasPrefix("```") { body.append(lines[i]); i += 1 }
+                i += 1
+                out.append(.code(lang, body.joined(separator: "\n")))
+                continue
+            }
+            if trimmed.hasPrefix("|"), trimmed.hasSuffix("|"), trimmed.count > 2 {
+                flushPara()
+                let inner = String(trimmed.dropFirst().dropLast())
+                let cells = inner.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+                let divider = cells.allSatisfy { cell in !cell.isEmpty && cell.allSatisfy { ch in "-: ".contains(ch) } }
+                if !divider { table.append(cells) }
+                i += 1
+                continue
+            }
+            flushTable()
+            if trimmed.isEmpty { flushPara(); i += 1; continue }
+            if let m = trimmed.range(of: #"^#{1,6}\s+"#, options: .regularExpression) {
+                flushPara()
+                let level = trimmed[m].filter { $0 == "#" }.count
+                out.append(.heading(level, String(trimmed[m.upperBound...])))
+                i += 1
+                continue
+            }
+            if trimmed.range(of: #"^(-{3,}|\*{3,}|_{3,})$"#, options: .regularExpression) != nil { flushPara(); out.append(.rule); i += 1; continue }
+            if let m = line.range(of: #"^\s*([-*•+]|\d{1,3}[.)])\s+"#, options: .regularExpression) {
+                flushPara()
+                let lead = String(line[m])
+                let indent = lead.prefix(while: { $0 == " " || $0 == "\t" }).count / 2
+                let marker = lead.trimmingCharacters(in: .whitespaces)
+                out.append(.item(indent, ["-", "*", "+", "•"].contains(marker) ? "•" : marker, String(line[m.upperBound...])))
+                i += 1
+                continue
+            }
+            if trimmed.hasPrefix(">") { flushPara(); out.append(.quote(String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces))); i += 1; continue }
+            para.append(line)
+            i += 1
+        }
+        flushPara(); flushTable()
+        return out
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(Self.parse(text).enumerated()), id: \.offset) { _, b in block(b) }
+        }
+    }
+
+    @ViewBuilder func block(_ b: Block) -> some View {
+        switch b {
+        case .para(let s):
+            Text(md(s)).font(SW.a(size, 400)).lineSpacing(4).foregroundStyle(color).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        case .heading(let level, let s):
+            Text(md(s)).font(SW.a(level <= 1 ? size + 7 : (level == 2 ? size + 4 : size + 1), 700)).foregroundStyle(color).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true).padding(.top, 4)
+        case .item(let indent, let marker, let s):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(marker).font(SW.a(size, 400)).foregroundStyle(DS.label2).frame(minWidth: 16, alignment: .trailing)
+                Text(md(s)).font(SW.a(size, 400)).lineSpacing(4).foregroundStyle(color).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.leading, CGFloat(indent) * 18).padding(.vertical, -2)
+        case .code(let lang, let s):
+            CodeBlock(lang: lang, code: s)
+        case .quote(let s):
+            Text(md(s)).font(SW.a(size, 400)).lineSpacing(4).foregroundStyle(DS.label2).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 12).overlay(alignment: .leading) { Rectangle().fill(DS.label3).frame(width: 2) }
+        case .rule:
+            Rectangle().fill(DS.separator.opacity(0.3)).frame(height: 1)
+        case .table(let rows):
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 6) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { ri, row in
+                    GridRow {
+                        ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                            Text(md(cell)).font(SW.a(size - 1, ri == 0 ? 700 : 400)).foregroundStyle(color).textSelection(.enabled)
+                        }
+                    }
+                    if ri == 0 { Rectangle().fill(DS.separator.opacity(0.3)).frame(height: 1) }
+                }
+            }
+        }
+    }
+}
+
+struct CodeBlock: View {
+    var lang: String
+    var code: String
+    @State private var copied = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(lang.isEmpty ? "code" : lang).font(SW.a(11.5, 500)).foregroundStyle(DS.label3)
+                Spacer()
+                Button {
+                    copyText(code)
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                } label: {
+                    Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc").font(SW.a(11.5, 500))
+                }
+                .buttonStyle(.plain).foregroundStyle(DS.label2)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(code).font(.system(size: 13, design: .monospaced)).foregroundStyle(DS.label).textSelection(.enabled)
+                    .padding(.horizontal, 12).padding(.bottom, 12)
+            }
+        }
+        .background(DS.raised).clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
